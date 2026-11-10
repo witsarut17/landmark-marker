@@ -30,6 +30,8 @@ ol, ul { margin: 0; padding-left: 18px; }
 li { margin: 1px 0; }
 p { margin: 2px 0; }
 code { font-family: Consolas, monospace; font-size: 9.2pt; }
+.page + .page { break-before: page; }
+@media screen { .page + .page { margin-top: 18mm; border-top: 1px dashed #999; padding-top: 8mm; } }
 @media screen { body { max-width: 210mm; margin: 12px auto; padding: 0 12mm; } }
 """
 
@@ -41,7 +43,11 @@ def inline(text: str) -> str:
     return t
 
 
-def convert(md: str) -> str:
+PAGEBREAK = "<!-- pagebreak -->"
+
+
+def convert_page(md: str) -> tuple[str, str]:
+    """คืน (หัวเรื่อง, html ของ 1 หน้า)"""
     top, sections, cur = [], [], None
     lst = None                                    # 'ol' / 'ul' ที่กำลังเปิดอยู่
     title = "คู่มือแพทย์"
@@ -57,7 +63,7 @@ def convert(md: str) -> str:
 
     for line in md.splitlines():
         s = line.rstrip()
-        if not s:
+        if not s or s.startswith("<!--"):
             close_list()
             continue
         if s.startswith("# "):
@@ -80,6 +86,14 @@ def convert(md: str) -> str:
     close_list()
     body = '<div class="top">' + "\n".join(top) + "</div>\n<div class=\"cols\">\n"
     body += "\n".join("<section>" + "\n".join(sec) + "</section>" for sec in sections) + "\n</div>"
+    return title, body
+
+
+def convert(md: str) -> str:
+    """แยกหน้าด้วยบรรทัด <!-- pagebreak --> · แต่ละหน้าเริ่มหน้ากระดาษใหม่ พิมพ์แยกหน้าได้"""
+    pages = [convert_page(part) for part in md.split(PAGEBREAK) if part.strip()]
+    body = "\n".join(f'<div class="page">{b}</div>' for _, b in pages)
+    title = "คู่มือแพทย์ PelNav"
     return (f'<!doctype html>\n<html lang="th"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1">'
             f"<title>{html.escape(title)}</title><style>{CSS}</style></head>\n<body>\n{body}\n</body></html>\n")

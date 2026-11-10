@@ -117,11 +117,13 @@ def build_fake():
     save_jpg(img(600, 600, 60), c3 / "fluoroscopy" / "IMG_7011.jpg")                 # มีทั้งชื่อหลักและชื่อมีคำต่อท้าย -> ตัด
     save_jpg(img(600, 600, 61), c3 / "fluoroscopy" / "IMG_7011FLIP.jpg")
     save_jpg(img(600, 600, 62), c3 / "fluoroscopy" / "IMG_7012.jpg")                 # fluo_id flip ซ้ำ 2 กรอบ -> ตัด แต่ยังนับเป็น flip
+    save_jpg(img(600, 600, 63), c3 / "fluoroscopy" / "IMG_7013.JPG")                 # fluo_id พิมพ์ '(MG_' -> ถือเป็น IMG_
+    save_jpg(img(600, 600, 64), c3 / "fluoroscopy" / "XMG_7014.JPG")                 # รูปแบบพิมพ์ผิดอื่น -> ไม่แก้
     imgs3 = [{"id": 1, "width": 1100, "height": 850, "file_name": "X1.bmp"}, {"id": 2, "width": 1000, "height": 800, "file_name": "X2.jpg"}]
     anns3 = [ann(201, 2, "IMG_7001"), ann(202, 2, "IMG_7002"), ann(203, 2, "IMG_7003"), ann(204, 1, "IMG_7004flip"),
              ann(205, 2, "IMG_7005flip"), ann(206, 2, "IMG_7006flip"), ann(207, 2, "IMG_7007rotate"), ann(208, 2, "IMG_7008flip"),
              ann(209, 2, "IMG_7009"), ann(210, 2, "IMG_7009flip"), ann(211, 2, "IMG_7010fip"), ann(212, 2, "IMG_7011flip"),
-             ann(213, 2, "IMG_7012flip"), ann(214, 2, "IMG_7012flip")]
+             ann(213, 2, "IMG_7012flip"), ann(214, 2, "IMG_7012flip"), ann(215, 2, "(MG_7013"), ann(216, 2, "(XMG_7014")]
     (c3 / "instances_clean.json").write_text(json.dumps({"images": imgs3, "annotations": anns3}), encoding="utf-8")
 
 
@@ -240,7 +242,7 @@ def main():
                        capture_output=True, text=True, encoding="utf-8")
     rep3 = {int(r_["annotation_id"]): r_ for r_ in csv.DictReader((OUT / "bmp_report.csv").open(encoding="utf-8-sig"))} if r.returncode == 0 else {}
     ok3 = {a for a, r_ in rep3.items() if r_["status"] == "ok"}
-    check(ok3 == {201, 202, 203, 204, 205, 207, 211},
+    check(ok3 == {201, 202, 203, 204, 205, 207, 211, 215},
           "flip/rotate: ใช้ไฟล์ชื่อหลักหรือชื่อมีคำต่อท้ายได้ ถ้ารวมกันเจอภาพเดียว · BMP ทุกโหมดสีผ่าน",
           f"{sorted(ok3)} {r.stdout[-300:]}{r.stderr[-300:]}")
     match3 = {a: (rep3.get(a, {}).get("fluo_match"), rep3.get(a, {}).get("fluo_flag")) for a in (204, 205, 207, 211)}
@@ -254,6 +256,9 @@ def main():
     check("BMP" in rep3.get(201, {}).get("notes", "") and "หมอระบุ flip" in rep3.get(205, {}).get("notes", "")
           and "fip" in rep3.get(211, {}).get("notes", ""), "รายงาน: หมายเหตุแปลง BMP / หมอระบุ flip / คำสะกดที่เขียนจริง",
           str({a: rep3.get(a, {}).get("notes") for a in (201, 205, 211)}))
+    check("(MG_" in rep3.get(215, {}).get("notes", "") and rep3.get(215, {}).get("fluo_id") == "(MG_7013"
+          and rep3.get(216, {}).get("status") == "excluded",
+          "fluo_id '(MG_' → 'IMG_' (เฉพาะรูปแบบนี้) + บันทึกในรายงาน + รายงานเก็บค่าเดิม", str({a: rep3.get(a) for a in (215, 216)})[:300])
     check("flip (หมอระบุใน fluo_id): 9 กรอบ · ใช้ได้ 3" in r.stdout and "rotate (หมอระบุใน fluo_id): 1 กรอบ · ใช้ได้ 1" in r.stdout,
           "dry-run/สร้าง: สรุปจำนวน flip/rotate ที่ใช้ได้และที่ตัด", [l for l in r.stdout.splitlines() if "หมอระบุใน" in l])
     if r.returncode == 0:
@@ -280,7 +285,8 @@ def main():
               and rep3.get(213, {}).get("fluo_flag") == "flip" and "ซ้ำ" in rep3.get(213, {}).get("problems", ""),
               "key.csv: บันทึก fluo_flag (flip / rotate) ของคู่ที่หมอระบุ", str(flags))
         sm3 = next(csv.DictReader((OUT / "bmp_summary_by_case.csv").open(encoding="utf-8-sig")))
-        want = {"flip_used": "3", "rotate_used": "1", "bmp_used": "4", "flag_no_file": "1", "flag_shared": "1", "fluo_reused": "1", "loose_ambiguous": "2"}
+        want = {"flip_used": "3", "rotate_used": "1", "bmp_used": "4", "flag_no_file": "1", "flag_shared": "1", "fluo_reused": "1", "loose_ambiguous": "2",
+                "fluo_not_found": "1"}
         check({k: sm3[k] for k in want} == want, "สรุปรายเคส: flip/rotate ใช้ · bmp ใช้ · สาเหตุที่ตัดแยกหมวด", str({k: sm3[k] for k in want}))
 
     # ป้องกันเขียนลงข้อมูลจริง / นอก .gitignore

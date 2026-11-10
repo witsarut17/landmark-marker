@@ -12,6 +12,8 @@
 (function () {
   'use strict';
   const CFG = window.MARKER_CONFIG;
+  // Mac (ไม่ใช่ iPad: iPadOS ก็บอกว่า Macintosh แต่มีจอสัมผัส)
+  const IS_MAC = /Mac/i.test(navigator.platform || navigator.userAgent) && !(navigator.maxTouchPoints > 1);
 
   class ImageViewer {
     constructor(container, opts = {}) {
@@ -337,6 +339,13 @@
         if (!this.pointers.has(e.pointerId) && this.hover) { this.hover = null; this._emit(); }
       });
       c.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
+      // Safari บน Mac: บีบสองนิ้วบนแทร็กแพดส่งเป็น gesture event (ไม่ใช่ wheel+ctrl)
+      // ใช้เฉพาะเครื่องที่ไม่มีจอสัมผัส — iPad ส่ง gesture event ด้วยแต่ซูมผ่าน pointer อยู่แล้ว (กันซูมซ้อน)
+      if (!(navigator.maxTouchPoints > 0)) {
+        c.addEventListener('gesturestart', (e) => this._onGesture(e, 'start'), { passive: false });
+        c.addEventListener('gesturechange', (e) => this._onGesture(e, 'change'), { passive: false });
+        c.addEventListener('gestureend', (e) => this._onGesture(e, 'end'), { passive: false });
+      }
       c.addEventListener('contextmenu', (e) => e.preventDefault());
     }
 
@@ -535,12 +544,34 @@
       this._emit(); this.requestRender();
     }
 
+    _onGesture(e, phase) {
+      e.preventDefault();
+      if (!this.img) return;
+      if (phase === 'end') { this.macPinch = null; return; }
+      if (phase === 'start') {
+        const p = Number.isFinite(e.clientX) && (e.clientX || e.clientY) ? this._local(e) : { x: this.cssW / 2, y: this.cssH / 2 };
+        this.macPinch = { s0: this.s, p };
+        return;
+      }
+      if (!this.macPinch || this.session) return;          // ระหว่างวางจุด ห้ามซูม
+      const sc = Number(e.scale);
+      if (!(sc > 0)) return;
+      this.zoomAt(this.macPinch.p.x, this.macPinch.p.y, this.macPinch.s0 * sc);
+      this._userView();
+    }
+
     _onWheel(e) {
       if (!this.img) return;
       e.preventDefault();
-      if (this.session) return;            // ระหว่างวางจุด ห้ามซูม (สเกลแว่นต้องคงที่)
+      if (this.session) return;            // ระหว่างวางจุด ห้ามซูม/เลื่อน (สเกลแว่นต้องคงที่)
+      if (this.macPinch && e.ctrlKey) return;   // Safari ส่งทั้ง gesture และ wheel+ctrl — ใช้ gesture อย่างเดียว
       const p = this._local(e);
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.cssH : 1;
+      if (!e.ctrlKey && IS_MAC && CFG.view.macScrollPans) {   // Mac: เลื่อนสองนิ้ว = เลื่อนภาพ
+        this.setView(this.s, this.tx - e.deltaX * unit, this.ty - e.deltaY * unit);
+        this._userView();
+        return;
+      }
       const speed = e.ctrlKey ? CFG.view.pinchWheelZoomSpeed : CFG.view.wheelZoomSpeed;
       this.zoomAt(p.x, p.y, this.s * Math.exp(-e.deltaY * unit * speed));
       this._userView();

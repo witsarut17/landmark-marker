@@ -53,6 +53,19 @@ SUFFIXED = re.compile(r"(.*?\d+)([a-z][a-z_\- ]*)", re.I)   # fluo_id ที่�
 FLAG_WORDS = {"flip": "flip", "flio": "flip", "fip": "flip", "rotate": "rotate"}
 
 
+# พิมพ์ผิดที่ทีมยืนยันแล้ว: แก้เฉพาะตอนจับคู่ (ไม่แก้ json ต้นฉบับ) และบันทึกในรายงาน
+FID_TYPO_PREFIX = {"(MG_": "IMG_"}
+
+
+def normalize_fid(fid: str) -> tuple[str, str | None]:
+    """คืน (fluo_id ที่ใช้จับคู่, หมายเหตุ) · แก้เฉพาะรูปแบบที่อยู่ใน FID_TYPO_PREFIX"""
+    f = fid.strip()
+    for bad, good in FID_TYPO_PREFIX.items():
+        if f.upper().startswith(bad):
+            return good + f[len(bad):], f"fluo_id พิมพ์ '{bad}' → ถือเป็น '{good}' (ไม่แก้ json ต้นฉบับ)"
+    return f, None
+
+
 def fluo_flag(fid: str):
     """fluo_id ที่ลงท้ายด้วยหมายเหตุของหมอ → (ชื่อหลัก, ชนิด flip/rotate, คำที่เขียนจริง) · อื่น ๆ → None"""
     m = SUFFIXED.fullmatch(fid.strip())
@@ -234,11 +247,11 @@ def collect_pairs(case_dir: Path) -> list[Pair]:
     x_by_lower = defaultdict(list)
     for p in xrays:
         x_by_lower[p.name.lower()].append(p)
-    fid_count = Counter(str((a.get("attributes") or {}).get("fluo_id", "")).strip().lower() for a in d.get("annotations", []))
+    fid_count = Counter(normalize_fid(str((a.get("attributes") or {}).get("fluo_id", "")))[0].lower() for a in d.get("annotations", []))
     # ภาพฟลูแต่ละภาพถูกอ้างโดยกี่กรอบ (นับทุกกรอบในเคส แม้กรอบนั้นมีปัญหาอื่น) — ภาพเดียวมี 2 กรอบ = ห้ามใช้
     boxes_per_file = Counter()
     for a in d.get("annotations", []):
-        f_ = str((a.get("attributes") or {}).get("fluo_id", "")).strip()
+        f_ = normalize_fid(str((a.get("attributes") or {}).get("fluo_id", "")))[0]
         if f_:
             path_, _, _ = match_fluo(f_, fluoros)
             if path_:
@@ -252,7 +265,10 @@ def collect_pairs(case_dir: Path) -> list[Pair]:
                  xray_name_coco=im.get("file_name", ""), fluo_id=str(attrs.get("fluo_id", "")).strip(),
                  bbox_xywh=a.get("bbox"), rotation=float(attrs.get("rotation", 0) or 0),
                  coco_size=(im.get("width"), im.get("height")))
-        fl = fluo_flag(p.fluo_id)
+        fid, typo_note = normalize_fid(p.fluo_id)     # p.fluo_id = ค่าเดิมใน json (ใช้ในรายงาน)
+        if typo_note:
+            p.notes.append(typo_note)
+        fl = fluo_flag(fid)
         p.flag = fl[1] if fl else ""           # ติดป้ายทุกกรอบ (รวมกรอบที่ fluo_id ซ้ำ) ให้นับครบ
         if not im:
             p.problems.append("annotation ไม่มี image ที่อ้างถึง")
@@ -271,10 +287,10 @@ def collect_pairs(case_dir: Path) -> list[Pair]:
         # ฟลู
         if not p.fluo_id:
             p.problems.append("ไม่มี fluo_id")
-        elif fid_count[p.fluo_id.lower()] > 1:
-            p.problems.append(f"fluo_id {p.fluo_id} ซ้ำ {fid_count[p.fluo_id.lower()]} กรอบ — ไม่รู้ว่ากรอบไหนถูก")
+        elif fid_count[fid.lower()] > 1:
+            p.problems.append(f"fluo_id {p.fluo_id} ซ้ำ {fid_count[fid.lower()]} กรอบ — ไม่รู้ว่ากรอบไหนถูก")
         else:
-            path, how, prob = match_fluo(p.fluo_id, fluoros)
+            path, how, prob = match_fluo(fid, fluoros)
             p.fluoro_path, p.match = path, how
             if prob:
                 p.problems.append(prob)

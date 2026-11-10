@@ -1,6 +1,6 @@
 // ค่าตั้งทั้งหมดของเว็บ แก้ที่ไฟล์นี้ไฟล์เดียว (ไม่ต้องแตะโค้ดส่วนอื่น)
 window.MARKER_CONFIG = Object.freeze({
-  APP_VERSION: '0.6.1',
+  APP_VERSION: '0.6.2',
 
   view: Object.freeze({
     fitMargin: 0.96,             // ตอนรีเซ็ต ภาพกินพื้นที่ 96% ของช่อง
@@ -9,6 +9,7 @@ window.MARKER_CONFIG = Object.freeze({
     maxScreenPxPerImagePx: 10,   // ซูมเข้าสูงสุด: 1 px ภาพ = 10 px จอ (1 px จอ ≥ 0.1 px ภาพ)
     wheelZoomSpeed: 0.0015,      // ล้อเมาส์
     pinchWheelZoomSpeed: 0.01,   // ทัชแพด pinch (ส่งมาเป็น wheel + ctrlKey)
+    macScrollPans: true,         // Mac: เลื่อนสองนิ้วบนแทร็กแพด = เลื่อนภาพ (ไม่ซูม) · บีบสองนิ้ว = ซูม
     pixelatedAboveScale: 2,      // ซูมเกิน 2 px จอ/พิกเซลภาพ -> แสดงพิกเซลคม ไม่เบลอ
   }),
 

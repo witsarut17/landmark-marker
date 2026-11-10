@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from local_paths import require_data_root  # noqa: E402
-from make_study_package import IMG_EXT, PROJECT, SUFFIXED, gitignored, match_fluo  # noqa: E402
+from make_study_package import IMG_EXT, PROJECT, SUFFIXED, gitignored, match_fluo, normalize_fid  # noqa: E402
 from check_splits import DEFAULT_SPLITS, read_splits  # noqa: E402
 
 OUT = PROJECT / "fluoro_missing_report.csv"
@@ -48,7 +48,7 @@ def find_shortcuts(case_dir: Path) -> list[str]:
 
 def inspect_case(case_dir: Path) -> dict:
     d = json.loads((case_dir / "instances_clean.json").read_text(encoding="utf-8"))
-    fids = [str((a.get("attributes") or {}).get("fluo_id", "")).strip() for a in d.get("annotations", [])]
+    fids = [normalize_fid(str((a.get("attributes") or {}).get("fluo_id", "")))[0] for a in d.get("annotations", [])]
     fd = case_dir / "fluoroscopy"
     shortcuts = find_shortcuts(case_dir)
     fluoro_link = fd.is_symlink() or getattr(os.path, "isjunction", lambda _p: False)(fd) or any(
