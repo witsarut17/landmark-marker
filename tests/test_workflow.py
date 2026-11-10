@@ -590,6 +590,74 @@ def test_ios_share(env: Env):
     c.close()
 
 
+MAC_INIT = """
+  Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+  Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+"""
+IPAD_INIT = """
+  Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+  Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 5 });
+"""
+TRACKPAD_JS = """
+(a) => {
+  const v = window.__marker.viewers.xray, c = v.canvas, r = c.getBoundingClientRect();
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const snap = () => ({ s: v.s, tx: v.tx, ty: v.ty });
+  const wheel = (o) => c.dispatchEvent(new WheelEvent('wheel', Object.assign({ clientX: cx, clientY: cy, bubbles: true, cancelable: true }, o)));
+  const gest = (type, scale) => { const e = new Event(type, { bubbles: true, cancelable: true });
+    Object.assign(e, { scale, clientX: cx, clientY: cy }); c.dispatchEvent(e); return e.defaultPrevented; };
+  const out = {};
+  out.s0 = snap();
+  wheel({ deltaY: -40, ctrlKey: true });                 // Chrome: บีบสองนิ้ว = wheel + ctrl
+  out.afterPinchWheel = snap();
+  wheel({ deltaX: 12, deltaY: 30 });                     // เลื่อนสองนิ้ว
+  out.afterScroll = snap();
+  gest('gesturestart', 1);                               // Safari: gesture event
+  gest('gesturechange', 1.5);
+  out.afterGesture = snap();
+  wheel({ deltaY: -40, ctrlKey: true });                 // Safari ส่ง wheel+ctrl ซ้อนระหว่าง gesture → ต้องไม่ซูมซ้ำ
+  out.afterDupWheel = snap();
+  gest('gestureend', 1.5);
+  out.howTo = document.getElementById('howTo').textContent;
+  return out;
+}
+"""
+
+
+def test_mac_trackpad(env: Env):
+    """MacBook: บีบสองนิ้ว (Chrome = wheel+ctrl, Safari = gesture event) = ซูม · เลื่อนสองนิ้ว = เลื่อนภาพ
+    และเครื่องอื่นต้องทำงานแบบเดิม (Windows: ล้อ = ซูม · iPad: ไม่รับ gesture event ซ้อนกับ pointer)"""
+    res = env.res
+    c = env.ctx(init=MAC_INIT)
+    p = env.page(c)
+    open_pkg(p)
+    o = p.evaluate(TRACKPAD_JS)
+    s0, a, b, g, d = o["s0"], o["afterPinchWheel"], o["afterScroll"], o["afterGesture"], o["afterDupWheel"]
+    res.check(a["s"] > s0["s"] * 1.2, "Mac: บีบสองนิ้วแบบ Chrome (wheel+ctrl) = ซูม", f"{s0['s']:.4f} -> {a['s']:.4f}")
+    res.check(abs(b["s"] - a["s"]) < 1e-12 and abs(b["tx"] - (a["tx"] - 12)) < 1e-6 and abs(b["ty"] - (a["ty"] - 30)) < 1e-6,
+              "Mac: เลื่อนสองนิ้ว = เลื่อนภาพ (ไม่ซูม)", f"s {a['s']:.4f}->{b['s']:.4f} t ({a['tx']:.1f},{a['ty']:.1f})->({b['tx']:.1f},{b['ty']:.1f})")
+    res.check(abs(g["s"] / b["s"] - 1.5) < 1e-6, "Mac: บีบสองนิ้วแบบ Safari (gesture event) = ซูม ตามสัดส่วน", f"{b['s']:.4f} -> {g['s']:.4f}")
+    res.check(abs(d["s"] - g["s"]) < 1e-12, "Mac Safari: wheel+ctrl ที่มาซ้อนระหว่าง gesture ไม่ซูมซ้ำ", f"{g['s']:.4f} -> {d['s']:.4f}")
+    res.check("แทร็กแพด" in o["howTo"] and "บีบสองนิ้ว" in o["howTo"], "Mac: แถบวิธีใช้บอกท่าแทร็กแพด", o["howTo"])
+    check_page_errors(p, res, "หน้าทดสอบ Mac")
+    c.close()
+
+    c = env.ctx()                                          # Windows (ค่าเดิม): ล้อเมาส์ = ซูม
+    p = env.page(c)
+    open_pkg(p)
+    o = p.evaluate(TRACKPAD_JS)
+    res.check(o["afterScroll"]["s"] < o["afterPinchWheel"]["s"] and abs(o["afterGesture"]["s"] / o["afterScroll"]["s"] - 1.5) < 1e-6
+              and "ล้อ = ซูม" in o["howTo"], "Windows: ล้อเมาส์ = ซูมเหมือนเดิม", o["howTo"])
+    c.close()
+
+    c = env.ctx(init=IPAD_INIT)                            # iPad: ไม่รับ gesture event (ซูมผ่าน pointer อยู่แล้ว)
+    p = env.page(c)
+    open_pkg(p)
+    o = p.evaluate(TRACKPAD_JS)
+    res.check(abs(o["afterGesture"]["s"] - o["afterScroll"]["s"]) < 1e-12, "iPad: gesture event ไม่ทำให้ซูมซ้อน", "")
+    c.close()
+
+
 def test_private_mode(env: Env):
     res = env.res
     init = ("IDBFactory.prototype.open = function () { throw new DOMException('The user denied permission', 'SecurityError'); };")
@@ -617,7 +685,7 @@ def main():
         browser = pw.chromium.launch(channel=args.channel, headless=not args.headed)
         env = Env(browser, base, res)
         for fn in (test_box_and_realistic, test_navigation_quality, test_data_safety, test_forced_backup,
-                   test_ios_resilience, test_ios_share, test_private_mode):
+                   test_ios_resilience, test_ios_share, test_mac_trackpad, test_private_mode):
             if args.only and not any(k in fn.__name__ for k in args.only.split(",")):
                 continue
             print(f"> {fn.__name__}", flush=True)

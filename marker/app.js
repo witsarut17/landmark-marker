@@ -351,7 +351,7 @@
         if (nextIndexFor(side) == null) return;
         if (pointerType === 'touch' && !state.fingerMode) toast('ใช้ Apple Pencil แตะเพื่อวางจุด หรือเปิด "นิ้ววางจุด"');
         else if (pointerType === 'touch') toast('กดค้างไว้ครู่หนึ่ง แว่นขยายจะขึ้น แล้วค่อย ๆ ขยับให้ตรง แล้วยกนิ้ว');
-        else toast('กดเมาส์ค้างไว้ครู่หนึ่ง แว่นขยายจะขึ้น แล้วขยับให้ตรง แล้วปล่อย');
+        else toast('กดเมาส์หรือกดแทร็กแพดค้างไว้ครู่หนึ่ง แว่นขยายจะขึ้น แล้วขยับให้ตรง แล้วปล่อย');
       },
     });
   }
@@ -441,7 +441,10 @@
     b.setAttribute('aria-pressed', String(state.fingerMode));
     b.textContent = `นิ้ววางจุด: ${state.fingerMode ? 'เปิด' : 'ปิด'}`;
     const touch = navigator.maxTouchPoints > 0;
-    $('howTo').textContent = !touch
+    const mac = /Mac/i.test(navigator.platform || navigator.userAgent) && !touch;
+    $('howTo').textContent = mac
+      ? 'แทร็กแพด: กดค้าง = วางจุด · เลื่อนสองนิ้ว = เลื่อนภาพ · บีบสองนิ้ว = ซูม'
+      : !touch
       ? 'เมาส์: กดค้าง = วางจุด · ลาก = เลื่อน · ล้อ = ซูม'
       : state.fingerMode ? 'นิ้ว: กดค้าง = วางจุด · ลาก = เลื่อน · สองนิ้ว = ซูม'
         : 'Pencil: แตะ/ลาก = วางจุด · นิ้ว: เลื่อน/ซูม';

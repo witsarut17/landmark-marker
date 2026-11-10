@@ -129,7 +129,7 @@ _(รอสรุปกับอาจารย์ตามเงื่อนไ
 
 ## สำหรับแพทย์ (iPad + Safari)
 
-**คู่มือ 1 หน้าสำหรับพิมพ์: [DOCTOR_GUIDE.md](DOCTOR_GUIDE.md)** (`python tools/print_guide.py` → เปิด `DOCTOR_GUIDE_print.html` ใน Edge → Ctrl+P) · ด้านล่างคือฉบับละเอียด
+**คู่มือสำหรับพิมพ์: [DOCTOR_GUIDE.md](DOCTOR_GUIDE.md)** — หน้า 1 iPad · หน้า 2 MacBook (พิมพ์แยกหน้าได้) (`python tools/print_guide.py` → เปิด `DOCTOR_GUIDE_print.html` ใน Edge → Ctrl+P) · ด้านล่างคือฉบับละเอียด
 
 > ภาพผู้ป่วยอยู่ใน iPad เท่านั้น ไม่ถูกส่งไปที่ใด · งานบันทึกใน iPad อัตโนมัติ
 
