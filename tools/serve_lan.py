@@ -4,6 +4,7 @@
     python tools/serve_lan.py --with-testdata
 
 - เปิดให้เห็น "เฉพาะโฟลเดอร์ marker/" (ตัวเว็บ) ไม่เปิดโฟลเดอร์อื่นของโปรเจกต์
+- --make-zip      : สร้างไฟล์ tests/generated/pelnav_testdata.zip ไว้ส่งเข้า iPad เอง (ใช้กับลิงก์ GitHub Pages)
 - --with-testdata : เพิ่มลิงก์ /testdata.zip ให้ iPad ดาวน์โหลดภาพทดสอบสังเคราะห์ (ไม่มีภาพผู้ป่วย)
 - ส่ง header no-store -> iPad ได้โค้ดล่าสุดทุกครั้ง ไม่ต้องล้างแคช
 - ปิดด้วย Ctrl+C
@@ -81,7 +82,14 @@ def main():
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--with-testdata", action="store_true", help="เพิ่มลิงก์ /testdata.zip (ภาพทดสอบสังเคราะห์)")
     ap.add_argument("--local", action="store_true", help="เปิดเฉพาะในเครื่องนี้ (127.0.0.1) — ใช้ตอนเปิดภาพจริงบนโน้ตบุ๊ก")
+    ap.add_argument("--make-zip", action="store_true", help="แค่สร้างไฟล์ tests/generated/pelnav_testdata.zip (ภาพทดสอบสังเคราะห์) แล้วจบ")
     args = ap.parse_args()
+
+    if args.make_zip:
+        out = GEN / "pelnav_testdata.zip"
+        out.write_bytes(build_testdata_zip())
+        print(f"สร้างแล้ว: {out} ({out.stat().st_size / 1e6:.1f} MB) — ภาพทดสอบสังเคราะห์เท่านั้น ไม่มีภาพผู้ป่วย")
+        return
 
     if args.with_testdata:
         Handler.testdata = build_testdata_zip()

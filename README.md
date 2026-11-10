@@ -17,7 +17,7 @@
 | 5 | บันทึกอัตโนมัติ, บังคับสำรองทุก 10 งาน, ส่งออก CSV/JSON, นำเข้า รวม/แทนที่ | ✅ (รอทดสอบบน iPad จริง) |
 | 6 | `make_study_package.py` | ✅ (pilot ภาพจริง 6 งาน ทีมทดลองแล้ว กรอบตรงทุกงาน) |
 | 7 | ทดสอบอัตโนมัติครบชุด | ✅ พิกัด + ขั้นตอนงาน + สร้างแพ็กเกจ |
-| 8 | iPad จริง, GitHub Pages, ทดลองกับหมอ | 🟨 iPad รอบ 1 ผ่าน · GitHub รอยืนยัน ([GITHUB_SETUP.md](GITHUB_SETUP.md)) |
+| 8 | iPad จริง, GitHub Pages, ทดลองกับหมอ | 🟨 iPad รอบ 1 ผ่าน · เว็บขึ้นแล้ว https://witsarut17.github.io/landmark-marker/ · รอ iPad รอบ 2 |
 
 ## โครงสร้าง
 
@@ -81,6 +81,8 @@ python -m venv .venv                                  # ครั้งแรก
 **มาตรฐานพิกัด:** แบบ COCO — (0, 0) คือมุมซ้ายบนของพิกเซลแรก, กึ่งกลางพิกเซล (i, j) อยู่ที่ (i+0.5, j+0.5) · ใช้กับ OpenCV ให้ลบ 0.5 (รายละเอียดใน [DECISIONS.md](DECISIONS.md))
 
 ## สำหรับทีม: ลองบน iPad (ระหว่างพัฒนา)
+
+**ผ่านลิงก์จริง https://witsarut17.github.io/landmark-marker/ (รอบ 2): [IPAD_TEST_PAGES.md](IPAD_TEST_PAGES.md)** — ภาพทดสอบจาก `python tools/serve_lan.py --make-zip`
 
 **คู่มือทีละขั้นพร้อมรายการตรวจ: [IPAD_TEST.md](IPAD_TEST.md)** — ใช้ `python tools/serve_lan.py --with-testdata` (เปิดให้เห็นเฉพาะโฟลเดอร์ marker/ + ลิงก์ดาวน์โหลดภาพทดสอบ)
 
