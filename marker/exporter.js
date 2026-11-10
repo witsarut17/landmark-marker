@@ -108,9 +108,10 @@
     } catch (_) { return false; }
   }
 
+  // ส่งเฉพาะไฟล์: ถ้าใส่ title/text ด้วย แอปไฟล์ของ iOS จะบันทึกข้อความนั้นเป็นไฟล์แยกอีก 1 ไฟล์
   async function share(text, name, type) {
     const file = new File([text], name, { type });
-    await navigator.share({ files: [file], title: name });
+    await navigator.share({ files: [file] });
   }
 
   // ---------- อ่านไฟล์สำรอง ----------
