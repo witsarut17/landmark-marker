@@ -554,6 +554,42 @@ def test_ios_resilience(env: Env):
     c.close()
 
 
+SHARE_STUB = """
+  window.__shared = [];
+  Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (iPad; CPU OS 26_4 like Mac OS X) AppleWebKit/605.1.15 Version/26.4 Mobile/15E148 Safari/604.1' });
+  navigator.canShare = (d) => !!(d && d.files && d.files.length);
+  navigator.share = async (d) => {
+    const files = await Promise.all((d.files || []).map(async (f) => ({ name: f.name, type: f.type, text: await f.text() })));
+    window.__shared.push({ keys: Object.keys(d).sort(), files });
+  };
+"""
+
+
+def test_ios_share(env: Env):
+    """iPad + https: ปุ่ม บันทึกไฟล์สำรองลงแอปไฟล์ ต้องส่งเฉพาะไฟล์ JSON 1 ไฟล์ (ไม่แนบข้อความ = ไม่มีไฟล์ข้อความแถม)"""
+    res = env.res
+    m = manifest()
+    c = env.ctx(init=SHARE_STUB)
+    p = env.page(c)
+    open_pkg(p)
+    p.click("#btnUnmarkable")
+    choose_reason(p, "view_angle")
+    p.wait_for_function("() => window.__marker.state.index === 1")
+    p.click("#btnExport")
+    wait_dialog(p)
+    hint = p.text_content("#dialog") or ""
+    p.click("#btnShareJson")
+    p.wait_for_function("() => window.__shared.length === 1")
+    sh = p.evaluate("() => window.__shared[0]")
+    ok_json = len(sh["files"]) == 1 and sh["files"][0]["name"].endswith(".json") and json.loads(sh["files"][0]["text"])["format"] == "pelnav-marks"
+    res.check(sh["keys"] == ["files"] and ok_json, "I แชร์บน iPad: ส่งเฉพาะไฟล์ JSON 1 ไฟล์ ไม่มี title/text", str(sh["keys"]) + " " + str([f["name"] for f in sh["files"]]))
+    res.check("PelNav สำรอง" not in hint and "เลือกโฟลเดอร์" not in hint, "I คำแนะนำในหน้าต่างไม่พูดถึงโฟลเดอร์เฉพาะ", hint[:120])
+    rec = idb_record(p, m["package_id"])
+    res.check(rec["last_backup_at"] is not None, "I แชร์สำเร็จ = บันทึกเวลาสำรองล่าสุด", str(rec["last_backup_at"]))
+    check_page_errors(p, res, "หน้าทดสอบแชร์")
+    c.close()
+
+
 def test_private_mode(env: Env):
     res = env.res
     init = ("IDBFactory.prototype.open = function () { throw new DOMException('The user denied permission', 'SecurityError'); };")
@@ -581,7 +617,7 @@ def main():
         browser = pw.chromium.launch(channel=args.channel, headless=not args.headed)
         env = Env(browser, base, res)
         for fn in (test_box_and_realistic, test_navigation_quality, test_data_safety, test_forced_backup,
-                   test_ios_resilience, test_private_mode):
+                   test_ios_resilience, test_ios_share, test_private_mode):
             if args.only and not any(k in fn.__name__ for k in args.only.split(",")):
                 continue
             print(f"> {fn.__name__}", flush=True)
