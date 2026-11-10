@@ -98,6 +98,31 @@ def build_fake():
     anns2 = [ann(100 + i, 1, f"IMG_{6000 + i}", (100 + i * 10, 100, 500, 400)) for i in range(1, 6)]
     (c2 / "instances_clean.json").write_text(json.dumps({"images": [{"id": 1, "width": 1200, "height": 900, "file_name": "IMG_5000.jpg"}],
                                                          "annotations": anns2}), encoding="utf-8")
+    # case 3: ภาพ BMP + fluo_id มีคำต่อท้าย (flip)
+    c3 = FAKE / "case_demo3"
+    (c3 / "xray").mkdir(parents=True)
+    (c3 / "fluoroscopy").mkdir(parents=True)
+    img(1100, 850, 40).save(c3 / "xray" / "X1.bmp")                                  # เอกซเรย์ BMP
+    save_jpg(img(1000, 800, 41), c3 / "xray" / "X2.jpg")
+    img(600, 600, 50).save(c3 / "fluoroscopy" / "IMG_7001.bmp")                      # RGB BMP
+    img(600, 600, 51, "L").save(c3 / "fluoroscopy" / "IMG_7002.BMP")                 # เทา BMP
+    img(600, 600, 52).convert("P", palette=Image.ADAPTIVE, colors=64).save(c3 / "fluoroscopy" / "IMG_7003.bmp")   # palette BMP
+    save_jpg(img(600, 600, 53), c3 / "fluoroscopy" / "IMG_7004FLIP.jpg")             # มีแต่ไฟล์ชื่อมีคำต่อท้าย -> ใช้
+    save_jpg(img(600, 600, 54), c3 / "fluoroscopy" / "IMG_7005.jpg")                 # มีแต่ไฟล์ชื่อหลัก -> ใช้ (flip เป็นหมายเหตุหมอ)
+    save_jpg(img(600, 600, 55), c3 / "fluoroscopy" / "IMG_7006flip.jpg")             # ชื่อมีคำต่อท้ายตรง 2 ไฟล์ -> ตัด
+    img(600, 600, 56).save(c3 / "fluoroscopy" / "IMG_7006FLIP.bmp")
+    img(600, 600, 57).save(c3 / "fluoroscopy" / "IMG_7007rotate.bmp")                # rotate + BMP -> ใช้
+    save_jpg(img(600, 600, 58), c3 / "fluoroscopy" / "IMG_7009.jpg")                 # ชื่อหลักมีกรอบอื่นด้วย -> ตัดทั้งคู่
+    save_jpg(img(600, 600, 59), c3 / "fluoroscopy" / "IMG_7010.jpg")                 # สะกด 'fip' -> ถือเป็น flip
+    save_jpg(img(600, 600, 60), c3 / "fluoroscopy" / "IMG_7011.jpg")                 # มีทั้งชื่อหลักและชื่อมีคำต่อท้าย -> ตัด
+    save_jpg(img(600, 600, 61), c3 / "fluoroscopy" / "IMG_7011FLIP.jpg")
+    save_jpg(img(600, 600, 62), c3 / "fluoroscopy" / "IMG_7012.jpg")                 # fluo_id flip ซ้ำ 2 กรอบ -> ตัด แต่ยังนับเป็น flip
+    imgs3 = [{"id": 1, "width": 1100, "height": 850, "file_name": "X1.bmp"}, {"id": 2, "width": 1000, "height": 800, "file_name": "X2.jpg"}]
+    anns3 = [ann(201, 2, "IMG_7001"), ann(202, 2, "IMG_7002"), ann(203, 2, "IMG_7003"), ann(204, 1, "IMG_7004flip"),
+             ann(205, 2, "IMG_7005flip"), ann(206, 2, "IMG_7006flip"), ann(207, 2, "IMG_7007rotate"), ann(208, 2, "IMG_7008flip"),
+             ann(209, 2, "IMG_7009"), ann(210, 2, "IMG_7009flip"), ann(211, 2, "IMG_7010fip"), ann(212, 2, "IMG_7011flip"),
+             ann(213, 2, "IMG_7012flip"), ann(214, 2, "IMG_7012flip")]
+    (c3 / "instances_clean.json").write_text(json.dumps({"images": imgs3, "annotations": anns3}), encoding="utf-8")
 
 
 def snapshot(root: Path):
@@ -121,7 +146,7 @@ def main():
 
     code, out = run()
     check(code == 0 and "DRY-RUN" in out and not any(OUT.iterdir()), "dry-run ไม่เขียนอะไร", out[-300:] if code else "")
-    check("กรอบทั้งหมด 19" in out and "ผ่านตรวจ 9" in out and "loose_ambiguous" in out, "dry-run สรุปจำนวนถูก (19 กรอบ ผ่าน 9) + ตารางรายเคส", [l for l in out.splitlines() if "กรอบทั้งหมด" in l])
+    check("กรอบทั้งหมด 19" in out and "ผ่านตรวจ 10" in out and "loose_ambiguous" in out, "dry-run สรุปจำนวนถูก (19 กรอบ ผ่าน 10) + ตารางรายเคส", [l for l in out.splitlines() if "กรอบทั้งหมด" in l])
 
     code, out = run("--write")
     check(code == 0, "สร้างแพ็กเกจได้", out[-500:])
@@ -131,11 +156,11 @@ def main():
     rep = list(csv.DictReader((OUT / "synth_report.csv").open(encoding="utf-8-sig")))
     status = {int(r["annotation_id"]): (r["status"], r["problems"], r["notes"]) for r in rep}
 
-    exp_ok = {1, 2, 3, 13, 101, 102, 103, 104, 105}
+    exp_ok = {1, 2, 3, 4, 13, 101, 102, 103, 104, 105}     # 4 = rotate → ใช้ไฟล์ชื่อหลัก
     got_ok = {a for a, s in status.items() if s[0] == "ok"}
     check(got_ok == exp_ok, "คู่ที่ผ่านตรวจถูกต้อง", f"ได้ {sorted(got_ok)} ควร {sorted(exp_ok)}")
     why = {
-        4: "คำต่อท้าย", 5: "ซ้ำ", 6: "ซ้ำ", 7: "ขนาดเอกซเรย์จริง", 8: "EXIF Orientation = 6",
+        5: "ซ้ำ", 6: "ซ้ำ", 7: "ขนาดเอกซเรย์จริง", 8: "EXIF Orientation = 6",
         9: "ไม่พบภาพฟลู", 10: "กรอบหมุน", 11: "กรอบเกินภาพ", 12: "EXIF Orientation = 3",
         14: "จับคู่หลวมได้ 2 ภาพ",
     }
@@ -199,15 +224,64 @@ def main():
     check(r.returncode == 0 and len(loose_tasks) == 1 and loose_imgs == [f"{loose_tasks[0]}_LOOSE.jpg"],
           "ภาพตรวจของงานจับคู่หลวมมี _LOOSE ท้ายชื่อ (เฉพาะงานนั้น)", f"{loose_tasks} {loose_imgs}")
     summ = {row["case"]: row for row in csv.DictReader((OUT / "all_summary_by_case.csv").open(encoding="utf-8-sig"))}
-    exp = {"boxes": 14, "ok": 4, "dup_fluo_id": 2, "suffix_rotate": 1, "fluo_not_found": 1, "loose_ambiguous": 1,
-           "size_mismatch": 1, "exif_orientation": 2, "box_rotated": 1, "box_bad": 1, "excluded": 10, "loose_used": 1,
-           "selected": 4, "selected_loose": 1}
+    exp = {"boxes": 14, "ok": 5, "dup_fluo_id": 2, "fluo_not_found": 1, "loose_ambiguous": 1,
+           "size_mismatch": 1, "exif_orientation": 2, "box_rotated": 1, "box_bad": 1, "excluded": 9, "loose_used": 1,
+           "rotate_used": 1, "selected": 5, "selected_loose": 1}
     got = {k: int(summ["case_demo1"][k]) for k in exp}
     check(got == exp and int(summ["case_demo2"]["ok"]) == 5, "สรุปรายเคส: จำนวนตัดออกแยกตามสาเหตุถูก", f"{got}")
     rep_all = list(csv.DictReader((OUT / "all_report.csv").open(encoding="utf-8-sig")))
     check(all(r_["category"] for r_ in rep_all if r_["status"] == "excluded") and
           any(r_["fluo_match"] == "loose_digits" and "หลวม" in r_["notes"] for r_ in rep_all),
           "รายงาน: ทุกกรอบที่ตัดมีสาเหตุ + กรอบจับคู่หลวมถูกบันทึก", "")
+
+    # BMP → PNG แบบไม่เสียคุณภาพ + กติกาคำต่อท้าย (flip/rotate)
+    r = subprocess.run([sys.executable, "-X", "utf8", "-B", str(SCRIPT), "--data-root", str(FAKE), "--out-root", str(OUT),
+                        "--cases", "case_demo3", "--name", "bmp", "--k", "50", "--repeat-frac", "0", "--write"],
+                       capture_output=True, text=True, encoding="utf-8")
+    rep3 = {int(r_["annotation_id"]): r_ for r_ in csv.DictReader((OUT / "bmp_report.csv").open(encoding="utf-8-sig"))} if r.returncode == 0 else {}
+    ok3 = {a for a, r_ in rep3.items() if r_["status"] == "ok"}
+    check(ok3 == {201, 202, 203, 204, 205, 207, 211},
+          "flip/rotate: ใช้ไฟล์ชื่อหลักหรือชื่อมีคำต่อท้ายได้ ถ้ารวมกันเจอภาพเดียว · BMP ทุกโหมดสีผ่าน",
+          f"{sorted(ok3)} {r.stdout[-300:]}{r.stderr[-300:]}")
+    match3 = {a: (rep3.get(a, {}).get("fluo_match"), rep3.get(a, {}).get("fluo_flag")) for a in (204, 205, 207, 211)}
+    check(match3 == {204: ("suffix_exact", "flip"), 205: ("suffix_base", "flip"), 207: ("suffix_exact", "rotate"), 211: ("suffix_base", "flip")},
+          "รายงาน: บอกว่าใช้ไฟล์ชื่อหลัก/ชื่อมีคำต่อท้าย + flip/rotate แยกกัน (สะกด fip = flip)", str(match3))
+    why3 = {206: ("หลายไฟล์", "loose_ambiguous"), 208: ("ไม่พบไฟล์ฟลูทั้งชื่อหลัก", "flag_no_file"),
+            209: ("มีกรอบอื่นด้วย", "fluo_reused"), 210: ("มีกรอบอื่นด้วย", "flag_shared"), 212: ("หลายไฟล์", "loose_ambiguous")}
+    got3 = {a: (rep3.get(a, {}).get("problems", ""), rep3.get(a, {}).get("category")) for a in why3}
+    check(all(w in got3[a][0] and got3[a][1] == c for a, (w, c) in why3.items()),
+          "flip/rotate ตัดออก: ไม่พบไฟล์ / ตรงหลายไฟล์ / ภาพเดียวมี 2 กรอบ (ตัดทั้งคู่) + สาเหตุแยกหมวด", str(got3))
+    check("BMP" in rep3.get(201, {}).get("notes", "") and "หมอระบุ flip" in rep3.get(205, {}).get("notes", "")
+          and "fip" in rep3.get(211, {}).get("notes", ""), "รายงาน: หมายเหตุแปลง BMP / หมอระบุ flip / คำสะกดที่เขียนจริง",
+          str({a: rep3.get(a, {}).get("notes") for a in (201, 205, 211)}))
+    check("flip (หมอระบุใน fluo_id): 9 กรอบ · ใช้ได้ 3" in r.stdout and "rotate (หมอระบุใน fluo_id): 1 กรอบ · ใช้ได้ 1" in r.stdout,
+          "dry-run/สร้าง: สรุปจำนวน flip/rotate ที่ใช้ได้และที่ตัด", [l for l in r.stdout.splitlines() if "หมอระบุใน" in l])
+    if r.returncode == 0:
+        pk3 = OUT / "bmp_package"
+        it3 = json.loads((pk3 / "manifest.json").read_text(encoding="utf-8"))["items"]
+        k3 = {r_["task_id"]: r_ for r_ in csv.DictReader((OUT / "bmp_key.csv").open(encoding="utf-8-sig"))}
+        pix_ok = conv_ok = True
+        for it in it3:
+            kr = k3[it["task_id"]]
+            for side, folder in (("xray", "xray"), ("fluoro", "fluoroscopy")):
+                src = FAKE / "case_demo3" / folder / kr[f"{side}_file"]
+                data = (pk3 / it[side]).read_bytes()
+                if src.suffix.lower() == ".bmp":
+                    conv_ok &= it[side].endswith(".png") and data[:8] == M.PNG_SIG and "lossless" in kr[f"{side}_converted"]
+                else:
+                    conv_ok &= not kr[f"{side}_converted"]
+                pix_ok &= M.pixels_digest(src.read_bytes()) == M.pixels_digest(data)
+        check(conv_ok, "BMP → ไฟล์ .png ในแพ็กเกจ + key.csv บันทึกการแปลง (เอกซเรย์และฟลู)", "")
+        check(pix_ok, "BMP → PNG: พิกเซลเหมือนต้นฉบับทุกจุด (RGB / เทา / palette)", "")
+        check("flip" not in (pk3 / "manifest.json").read_text(encoding="utf-8").lower()
+              and "rotate" not in (pk3 / "manifest.json").read_text(encoding="utf-8").lower(), "manifest ไม่บอกหมอว่าภาพกลับด้าน/หมุน", "")
+        flags = {kr["annotation_id"]: kr["fluo_flag"] for kr in k3.values()}
+        check(flags.get("205") == "flip" and flags.get("207") == "rotate" and flags.get("201") == ""
+              and rep3.get(213, {}).get("fluo_flag") == "flip" and "ซ้ำ" in rep3.get(213, {}).get("problems", ""),
+              "key.csv: บันทึก fluo_flag (flip / rotate) ของคู่ที่หมอระบุ", str(flags))
+        sm3 = next(csv.DictReader((OUT / "bmp_summary_by_case.csv").open(encoding="utf-8-sig")))
+        want = {"flip_used": "3", "rotate_used": "1", "bmp_used": "4", "flag_no_file": "1", "flag_shared": "1", "fluo_reused": "1", "loose_ambiguous": "2"}
+        check({k: sm3[k] for k in want} == want, "สรุปรายเคส: flip/rotate ใช้ · bmp ใช้ · สาเหตุที่ตัดแยกหมวด", str({k: sm3[k] for k in want}))
 
     # ป้องกันเขียนลงข้อมูลจริง / นอก .gitignore
     r = subprocess.run([sys.executable, "-X", "utf8", "-B", str(SCRIPT), "--data-root", str(FAKE), "--out-root", str(FAKE),

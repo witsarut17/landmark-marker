@@ -110,6 +110,8 @@ python -I -X utf8 -B tools/make_study_package.py --pilot --cases เคสตั
 python -I -X utf8 -B tools/check_splits.py                                    # 1) ตรวจไฟล์แบ่งชุด (อ่านอย่างเดียว)
 python -I -X utf8 -B tools/make_study_package.py --splits splits.csv --k 3    # 2) dry-run แล้วค่อยเติม --write
 ```
+เคสที่ใช้ภาพฟลูไม่ได้เลย: `python -I -X utf8 -B tools/report_fluoro_missing.py` → `fluoro_missing_report.csv` (.gitignore) · ภาพ BMP ถูกแปลงเป็น PNG แบบไม่เสียคุณภาพ (ตรวจพิกเซล) · fluo_id ที่ลงท้าย flip/rotate (หมายเหตุของหมอ) จับคู่กับไฟล์ชื่อหลักหรือชื่อที่มีคำต่อท้าย ใช้ได้เมื่อรวมกันเจอภาพเดียวและภาพนั้นไม่มีกรอบอื่น · บันทึกใน key.csv คอลัมน์ `fluo_flag` (ไม่อยู่ใน manifest)
+
 `check_splits.py` ตรวจ: ครบทุกเคสในโฟลเดอร์ข้อมูล · train/val/test เท่านั้น · test = 70 · ไม่มีชื่อ/HN · เคสที่สงสัยว่าเป็นผู้ป่วยคนเดียวกัน (`tools/same_patient_groups.txt` อยู่ในเครื่องเท่านั้น) อยู่ชุดเดียวกัน · เคส test มีกรอบใน instances_clean.json อย่างน้อย 1 กรอบ
 ผลลัพธ์ (ทั้งหมดอยู่ใน .gitignore): `pilot_package/` (ให้แพทย์) · `pilot_key.csv` (ทีมเท่านั้น) · `pilot_report.csv` (ทุกกรอบ + สาเหตุที่ตัด) · `pilot_summary_by_case.csv` (นับสาเหตุที่ตัดแยกรายเคส) · `pilot_check/` (ภาพตรวจกรอบ — งานที่จับคู่ fluo_id แบบหลวมชื่อ `Txxx_LOOSE.jpg` ให้ดูด้วยตาก่อน)
 

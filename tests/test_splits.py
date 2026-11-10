@@ -100,6 +100,36 @@ def main():
     check(before + [good.as_posix(), bad.as_posix()] == sorted(set(after)) or set(after) - set(before) <= {good.as_posix(), bad.as_posix()},
           "check_splits ไม่เขียนไฟล์ใด ๆ ลงโฟลเดอร์ข้อมูล", "")
 
+    # report_fluoro_missing: ไม่มีโฟลเดอร์ / โฟลเดอร์ว่าง / ชื่อไม่ตรง / ปกติ
+    ann = lambda fid: {"id": 1, "image_id": 1, "bbox": [1, 1, 5, 5], "attributes": {"fluo_id": fid}}
+    for c, setup in (("case_demo12", "empty"), ("case_demo13", "mismatch"), ("case_demo14", "ok")):
+        fd = FAKE / c / "fluoroscopy"
+        fd.mkdir(exist_ok=True)
+        (fd / "desktop.ini").write_text("x", encoding="utf-8")
+        if setup == "empty":
+            (fd / "notes.txt").write_text("x", encoding="utf-8")
+        else:
+            (fd / "IMG_1.jpg").write_bytes(b"x")
+        (FAKE / c / "instances_clean.json").write_text(json.dumps({"annotations": [ann("IMG_9" if setup == "mismatch" else "IMG_1")]}), encoding="utf-8")
+    (FAKE / "case_demo15" / "fluoroscopy.lnk").write_bytes(b"L\x00\x00\x00")         # โฟลเดอร์ฟลูเป็นทางลัด
+    (FAKE / "case_demo14" / "fluoroscopy" / "old.lnk").write_bytes(b"L\x00\x00\x00")   # ทางลัดอื่นในเคสปกติ
+    rp = OUT.parent / "_fluoro_missing_report.csv"
+    r = subprocess.run([sys.executable, "-X", "utf8", "-B", str(ROOT / "tools/report_fluoro_missing.py"), "--data-root", str(FAKE),
+                        "--splits", str(good), "--out", str(rp)], capture_output=True, text=True, encoding="utf-8")
+    import csv as _csv
+    rows_ = list(_csv.DictReader(rp.open(encoding="utf-8-sig"))) if r.returncode == 0 else []
+    got = {row["case"]: (row["cause"], row["split"]) for row in rows_}
+    sc = {row["case"]: row["shortcuts"] for row in rows_}
+    check(got.get("case_demo11", ("",))[0] == "no_folder" and got.get("case_demo12") == ("empty_folder", "test")
+          and got.get("case_demo13") == ("name_mismatch", "test") and "รวมชุด test: 3" in r.stdout,
+          "report_fluoro_missing: แยกสาเหตุ ไม่มีโฟลเดอร์ / ว่าง / ชื่อไม่ตรง + นับชุด test", f"{got} {r.stdout[-200:]}{r.stderr[-200:]}")
+    check(got.get("case_demo15", ("",))[0] == "shortcut" and got.get("case_demo14", ("x",))[0] == ""
+          and sc.get("case_demo14") == "fluoroscopy/old.lnk" and "ทางลัด" in r.stdout,
+          "report_fluoro_missing: เจอโฟลเดอร์ฟลูที่เป็นทางลัด + ทางลัดอื่นในเคส", f"{got} {sc}")
+    r = subprocess.run([sys.executable, "-X", "utf8", "-B", str(ROOT / "tools/report_fluoro_missing.py"), "--data-root", str(FAKE),
+                        "--splits", str(good), "--out", str(FAKE / "x_report.csv")], capture_output=True, text=True, encoding="utf-8")
+    check(r.returncode != 0 and not (FAKE / "x_report.csv").exists(), "report_fluoro_missing: ห้ามเขียนลงโฟลเดอร์ข้อมูล", "")
+
     # make_study_package --splits (ใช้ข้อมูลปลอมพร้อมภาพจาก test_make_package)
     if not PKG_FAKE.exists():
         check(False, "ต้องรัน tests/test_make_package.py ก่อน (สร้าง fake_data)")
@@ -108,14 +138,14 @@ def main():
             shutil.rmtree(OUT)
         OUT.mkdir(parents=True)
         sp = OUT.parent / "_splits_pkg.csv"
-        sp.write_text("case_id,split\ncase_demo1,test\ncase_demo2,train\n", encoding="utf-8")
+        sp.write_text("case_id,split\ncase_demo1,test\ncase_demo2,train\ncase_demo3,train\n", encoding="utf-8")
         cmd = [sys.executable, "-X", "utf8", "-B", str(ROOT / "tools/make_study_package.py"), "--data-root", str(PKG_FAKE),
-               "--out-root", str(OUT), "--splits", str(sp), "--expect", "train=1,val=0,test=1", "--name", "synth", "--k", "3"]
+               "--out-root", str(OUT), "--splits", str(sp), "--expect", "train=2,val=0,test=1", "--name", "synth", "--k", "3"]
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
         out = r.stdout + r.stderr
         check(r.returncode == 0 and "ใช้ 1 เคสจากชุด test" in out and "case_demo1" in out and "case_demo2" not in out.split("ใช้ 1 เคส")[1],
               "make_study_package --splits: ใช้เฉพาะเคสชุด test", out[-300:])
-        sp.write_text("case_id,split\ncase_demo1,test\n", encoding="utf-8")
+        sp.write_text("case_id,split\ncase_demo1,test\ncase_demo3,train\n", encoding="utf-8")
         r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
         check(r.returncode != 0 and "ไม่ผ่านการตรวจ" in (r.stdout + r.stderr), "make_study_package --splits: splits ผิด → หยุดก่อนอ่านภาพ",
               (r.stdout + r.stderr)[-200:])
