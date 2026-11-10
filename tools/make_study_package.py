@@ -46,7 +46,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from local_paths import require_data_root  # noqa: E402
 
 PROJECT = Path(__file__).resolve().parents[1]
-IMG_EXT = {".jpg", ".jpeg", ".png"}
+IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp"}
+EXT_FORMAT = {".jpg": "jpeg", ".jpeg": "jpeg", ".png": "png", ".bmp": "bmp"}
+SUFFIXED = re.compile(r"(.*?\d+)([a-z][a-z_\- ]*)", re.I)   # fluo_id ที่มีคำต่อท้าย เช่น IMG_0001flip
+# คำต่อท้ายที่หมอเขียนเป็นหมายเหตุ (ภาพกลับด้าน/หมุน) — ไม่ใช่ส่วนของชื่อไฟล์เสมอไป (รวมคำสะกดผิดที่พบจริง)
+FLAG_WORDS = {"flip": "flip", "flio": "flip", "fip": "flip", "rotate": "rotate"}
+
+
+def fluo_flag(fid: str):
+    """fluo_id ที่ลงท้ายด้วยหมายเหตุของหมอ → (ชื่อหลัก, ชนิด flip/rotate, คำที่เขียนจริง) · อื่น ๆ → None"""
+    m = SUFFIXED.fullmatch(fid.strip())
+    if not m:
+        return None
+    word = m.group(2).strip().lower()
+    return (m.group(1), FLAG_WORDS[word], word) if word in FLAG_WORDS else None
 
 
 # ------------------------------------------------------------------ ลบ metadata แบบไม่เข้ารหัสภาพใหม่
@@ -113,9 +126,20 @@ def kind_of(data: bytes) -> str | None:
 
 
 def pixels_digest(data: bytes) -> tuple[tuple[int, int], str]:
+    """ขนาด + sha256 ของพิกเซลที่ถอดรหัสแล้ว (รวมโหมดสี และ palette ถ้ามี)"""
     with Image.open(io.BytesIO(data)) as im:
         im.load()
-        return im.size, hashlib.sha256(im.tobytes() + im.mode.encode()).hexdigest()
+        pal = bytes(im.getpalette() or []) if im.mode in ("P", "PA") else b""
+        return im.size, hashlib.sha256(im.tobytes() + im.mode.encode() + pal).hexdigest()
+
+
+def bmp_to_png(data: bytes) -> bytes:
+    """แปลง BMP เป็น PNG แบบไม่เสียคุณภาพ (PNG บีบอัดแบบไม่สูญเสีย) ไม่ใส่ข้อความ/เวลา/EXIF · ผู้เรียกต้องตรวจพิกเซลซ้ำ"""
+    with Image.open(io.BytesIO(data)) as im:
+        im.load()
+        buf = io.BytesIO()
+        im.save(buf, "PNG", optimize=False)
+    return strip_png(buf.getvalue())
 
 
 def exif_orientation(im: Image.Image) -> int | None:
@@ -142,6 +166,7 @@ class Pair:
     fluoro_size: tuple | None = None
     box_xyxy: list | None = None
     match: str = ""
+    flag: str = ""                    # flip / rotate (หมอเขียนต่อท้าย fluo_id) — บันทึกใน key/report ไม่ใส่ manifest
     problems: list = field(default_factory=list)
     notes: list = field(default_factory=list)
 
@@ -172,6 +197,16 @@ def match_fluo(fid: str, fluoros: list[Path]):
     for p in fluoros:
         by_lower[p.stem.lower()].append(p)
     key = fid.strip().lower()
+    fl = fluo_flag(fid)
+    if fl:   # หมอระบุ flip/rotate: ไฟล์จริงอาจชื่อหลัก (IMG_1754.jpg) หรือมีคำต่อท้ายในชื่อ (IMG_1754FLIP.jpg) — ต้องเจอรวมกันภาพเดียว
+        base, kind, _ = fl
+        exact, plain = by_lower.get(key, []), by_lower.get(base.lower(), [])
+        cands = exact + plain
+        if len(cands) == 1:
+            return cands[0], ("suffix_exact" if exact else "suffix_base"), None
+        if not cands:
+            return None, "", f"fluo_id {fid} (หมอระบุ {kind}) ไม่พบไฟล์ฟลูทั้งชื่อหลักและชื่อที่มีคำต่อท้าย"
+        return None, "", f"fluo_id {fid} (หมอระบุ {kind}) ตรงกับภาพฟลูหลายไฟล์ ({len(cands)} ไฟล์)"
     if len(by_lower.get(key, [])) == 1:
         return by_lower[key][0], ("exact" if by_lower[key][0].stem == fid.strip() else "case"), None
     if len(by_lower.get(key, [])) > 1:
@@ -183,9 +218,10 @@ def match_fluo(fid: str, fluoros: list[Path]):
         if not cands:
             return None, "", f"ไม่พบภาพฟลูของ fluo_id {fid} (เลขล้วน)"
         return None, "", f"fluo_id {fid} (เลขล้วน) จับคู่หลวมได้ {len(cands)} ภาพ — ไม่รู้ว่าภาพไหน"
-    m = re.fullmatch(r"(.*?\d+)([a-z_\- ]+)", key)
-    if m and m.group(1) in by_lower:
-        return None, "", f"fluo_id {fid} มีคำต่อท้าย '{m.group(2).strip()}' (อาจเป็นภาพที่ถูกหมุน/แก้) — ไม่ใช้"
+    m = SUFFIXED.fullmatch(key)
+    if m:   # มีคำต่อท้าย (flip/rotate ฯลฯ) แต่ไม่มีไฟล์ชื่อตรง → ห้ามใช้ไฟล์ที่ไม่มีคำต่อท้ายแทน (ภาพคนละทิศ)
+        base = "มีแต่ไฟล์ชื่อไม่มีคำต่อท้าย — ไม่ใช้แทน" if m.group(1) in by_lower else "ไม่มีไฟล์ชื่อนี้"
+        return None, "", f"fluo_id {fid} มีคำต่อท้าย '{m.group(2).strip()}' แต่ไม่พบไฟล์ฟลูชื่อตรง ({base})"
     return None, "", f"ไม่พบภาพฟลูของ fluo_id {fid}"
 
 
@@ -199,6 +235,14 @@ def collect_pairs(case_dir: Path) -> list[Pair]:
     for p in xrays:
         x_by_lower[p.name.lower()].append(p)
     fid_count = Counter(str((a.get("attributes") or {}).get("fluo_id", "")).strip().lower() for a in d.get("annotations", []))
+    # ภาพฟลูแต่ละภาพถูกอ้างโดยกี่กรอบ (นับทุกกรอบในเคส แม้กรอบนั้นมีปัญหาอื่น) — ภาพเดียวมี 2 กรอบ = ห้ามใช้
+    boxes_per_file = Counter()
+    for a in d.get("annotations", []):
+        f_ = str((a.get("attributes") or {}).get("fluo_id", "")).strip()
+        if f_:
+            path_, _, _ = match_fluo(f_, fluoros)
+            if path_:
+                boxes_per_file[path_] += 1
 
     pairs = []
     for a in d.get("annotations", []):
@@ -208,6 +252,8 @@ def collect_pairs(case_dir: Path) -> list[Pair]:
                  xray_name_coco=im.get("file_name", ""), fluo_id=str(attrs.get("fluo_id", "")).strip(),
                  bbox_xywh=a.get("bbox"), rotation=float(attrs.get("rotation", 0) or 0),
                  coco_size=(im.get("width"), im.get("height")))
+        fl = fluo_flag(p.fluo_id)
+        p.flag = fl[1] if fl else ""           # ติดป้ายทุกกรอบ (รวมกรอบที่ fluo_id ซ้ำ) ให้นับครบ
         if not im:
             p.problems.append("annotation ไม่มี image ที่อ้างถึง")
         # เอกซเรย์
@@ -216,6 +262,8 @@ def collect_pairs(case_dir: Path) -> list[Pair]:
             p.xray_path = cand[0]
             if cand[0].name != p.xray_name_coco:
                 p.notes.append("ชื่อเอกซเรย์ต่างตัวพิมพ์ใหญ่/เล็ก")
+            if cand[0].suffix.lower() == ".bmp":
+                p.notes.append("ภาพเอกซเรย์เป็น BMP → แปลงเป็น PNG แบบไม่เสียคุณภาพ")
         elif len(cand) > 1:
             p.problems.append("ชื่อเอกซเรย์ตรงกับหลายไฟล์")
         else:
@@ -230,14 +278,19 @@ def collect_pairs(case_dir: Path) -> list[Pair]:
             p.fluoro_path, p.match = path, how
             if prob:
                 p.problems.append(prob)
+            elif boxes_per_file[path] > 1:
+                p.problems.append(f"ภาพฟลู {path.name} มีกรอบอื่นด้วย (รวม {boxes_per_file[path]} กรอบ)"
+                                  + (f" — fluo_id ที่หมอระบุ {p.flag}" if p.flag else ""))
             elif how == "loose_digits":
                 p.notes.append(f"fluo_id '{p.fluo_id}' จับคู่แบบหลวมกับ {path.stem}")
+            if path and not p.problems:
+                if fl:
+                    p.notes.append(f"หมอระบุ {fl[1]}" + (f" (เขียน '{fl[2]}')" if fl[2] != fl[1] else "")
+                                   + f" → ใช้ไฟล์{'ชื่อหลัก' if how == 'suffix_base' else 'ชื่อที่มีคำต่อท้าย'}")
+                if path.suffix.lower() == ".bmp":
+                    p.notes.append("ภาพฟลูเป็น BMP → แปลงเป็น PNG แบบไม่เสียคุณภาพ")
         # ฟลูภาพเดียวกันถูกใช้โดยหลาย annotation (ผ่าน match หลวม)
         pairs.append(p)
-    used = Counter(p.fluoro_path for p in pairs if p.fluoro_path and not p.problems)
-    for p in pairs:
-        if p.fluoro_path and not p.problems and used[p.fluoro_path] > 1:
-            p.problems.append(f"ภาพฟลู {p.fluoro_path.name} ถูกใช้โดย {used[p.fluoro_path]} กรอบ")
     # กรอบ
     for p in pairs:
         b = p.bbox_xywh
@@ -262,7 +315,7 @@ def check_images(p: Pair):
             p.problems.append(f"เปิดภาพ{side}ไม่ได้ ({e.__class__.__name__})")
             continue
         ext = path.suffix.lower()
-        if (fmt == "png") != (ext == ".png") or fmt not in ("jpeg", "png"):
+        if fmt != EXT_FORMAT.get(ext):
             p.problems.append(f"{side}: ชนิดไฟล์จริง {fmt} ไม่ตรงนามสกุล {ext}")
         if ori not in (None, 1):
             p.problems.append(f"{side}: EXIF Orientation = {ori} (ไม่รู้ว่าตอนตีกรอบภาพถูกหมุนหรือไม่)")
@@ -288,10 +341,12 @@ def check_images(p: Pair):
 # ------------------------------------------------------------------ สรุปสาเหตุรายเคส
 CATEGORIES = [   # (รหัสคอลัมน์, ชื่อไทย, regex ของข้อความปัญหา)
     ("dup_fluo_id", "fluo_id ซ้ำ", r"ซ้ำ \d+ กรอบ"),
-    ("suffix_rotate", "fluo_id มีคำต่อท้าย (rotate ฯลฯ)", r"คำต่อท้าย"),
+    ("flag_shared", "flip/rotate: ภาพฟลูมีกรอบอื่นด้วย", r"มีกรอบอื่นด้วย.*หมอระบุ"),
+    ("flag_no_file", "flip/rotate: ไม่พบไฟล์ฟลู", r"หมอระบุ \w+\) ไม่พบ"),
+    ("suffix_other", "fluo_id มีคำต่อท้ายอื่น (ไม่ใช่ flip/rotate)", r"คำต่อท้าย"),
     ("fluo_not_found", "หาภาพฟลูไม่เจอ", r"ไม่พบภาพฟลู|ไม่มี fluo_id"),
-    ("loose_ambiguous", "หลวม แต่ตรงหลายภาพ", r"จับคู่หลวมได้|ตรงกับภาพฟลูหลายไฟล์"),
-    ("fluo_reused", "ภาพฟลูถูกใช้หลายกรอบ", r"ถูกใช้โดย"),
+    ("loose_ambiguous", "ตรงหลายภาพ (หลวม/flip/ชื่อซ้ำต่างนามสกุล)", r"จับคู่หลวมได้|ตรงกับภาพฟลูหลายไฟล์"),
+    ("fluo_reused", "ภาพฟลูมีหลายกรอบ", r"มีกรอบอื่นด้วย"),
     ("xray_not_found", "หาภาพเอกซเรย์ไม่เจอ", r"ไม่พบไฟล์เอกซเรย์|ชื่อเอกซเรย์ตรงกับหลายไฟล์|ไม่มี image"),
     ("size_mismatch", "ขนาดเอกซเรย์ไม่ตรง COCO", r"ขนาดเอกซเรย์จริง"),
     ("exif_orientation", "EXIF ให้หมุนภาพ", r"EXIF Orientation"),
@@ -322,6 +377,9 @@ def summary_by_case(cases, all_pairs, ok_by_case, chosen):
         row["loose_used"] = sum(1 for p in ps if p.ok and p.match == "loose_digits")
         row["selected"] = sum(1 for p in chosen if p.case == c)
         row["selected_loose"] = sum(1 for p in chosen if p.case == c and p.match == "loose_digits")
+        row["flip_used"] = sum(1 for p in ps if p.ok and p.flag == "flip")
+        row["rotate_used"] = sum(1 for p in ps if p.ok and p.flag == "rotate")
+        row["bmp_used"] = sum(1 for p in ps if p.ok and p.fluoro_path and p.fluoro_path.suffix.lower() == ".bmp")
         rows.append(row)
     return rows
 
@@ -501,6 +559,7 @@ def main():
     package_id = f"pkg-{name}-{date}"
 
     # ---------- สรุป
+    th_all = {code: name for code, name, _ in CATEGORIES}
     reasons = Counter()
     for p in all_pairs:
         for pr in p.problems:
@@ -514,19 +573,26 @@ def main():
         print(f"   ไม่ผ่าน {n:4d} × {r}")
     for r, n in notes.most_common():
         print(f"   หมายเหตุ {n:3d} × {r}")
+    for kind in ("flip", "rotate"):
+        fp = [p for p in all_pairs if p.flag == kind]
+        if fp:
+            cat = Counter(categorize(p.problems[0]) for p in fp if p.problems)
+            print(f"{kind} (หมอระบุใน fluo_id): {len(fp)} กรอบ · ใช้ได้ {sum(p.ok for p in fp)} "
+                  f"(ไฟล์ชื่อหลัก {sum(p.ok and p.match == 'suffix_base' for p in fp)} · ไฟล์ชื่อมีคำต่อท้าย {sum(p.ok and p.match == 'suffix_exact' for p in fp)})"
+                  + (" · ตัด: " + ", ".join(f"{th_all.get(k, k)} {v}" for k, v in cat.most_common()) if cat else ""))
     print(f"สุ่ม k={args.k} คู่/เคส seed={args.seed} → คู่ {len(chosen)} · งานซ้ำ {sum(1 for e in entries if e['is_repeat_of'])} · รวม {len(entries)} งาน")
     summ = summary_by_case(cases, all_pairs, ok_by_case, chosen)
     cols = [code for code, _, _ in CATEGORIES if any(r[code] for r in summ)] + (["other"] if any(r["other"] for r in summ) else [])
     th = {code: name for code, name, _ in CATEGORIES}
-    print("รายเคส: ตัดออกแยกตามสาเหตุ · หลวมใช้ = จับคู่หลวมที่ผ่านตรวจ · เลือก(หลวม) = งานที่เลือก (ในนั้นจับคู่หลวม)")
+    print("รายเคส: ตัดออกแยกตามสาเหตุ · หลวมใช้ = จับคู่หลวมที่ผ่านตรวจ · flip/rotate = กรอบที่หมอระบุ flip/rotate ที่ผ่านตรวจ · bmp = ภาพฟลู BMP ที่ผ่านตรวจ (จะแปลงเป็น PNG) · เลือก(หลวม) = งานที่เลือก (ในนั้นจับคู่หลวม)")
     for code in cols:
         print(f"   {code} = {th.get(code, 'อื่น ๆ')}")
-    head = f"{'เคส':<12}{'กรอบ':>6}{'ผ่าน':>6}" + "".join(f"{c:>18}" for c in cols) + f"{'หลวมใช้':>9}{'เลือก(หลวม)':>13}"
+    head = f"{'เคส':<12}{'กรอบ':>6}{'ผ่าน':>6}" + "".join(f"{c:>18}" for c in cols) + f"{'หลวมใช้':>9}{'flip':>6}{'rotate':>8}{'bmp':>6}{'เลือก(หลวม)':>13}"
     print(head)
 
     def line(label, r):
         sel = f"{r['selected']}({r['selected_loose']})"
-        return f"{label:<12}{r['boxes']:>6}{r['ok']:>6}" + "".join(f"{r[c]:>18}" for c in cols) + f"{r['loose_used']:>9}{sel:>13}"
+        return f"{label:<12}{r['boxes']:>6}{r['ok']:>6}" + "".join(f"{r[c]:>18}" for c in cols) + f"{r['loose_used']:>9}{r['flip_used']:>6}{r['rotate_used']:>8}{r['bmp_used']:>6}{sel:>13}"
     for r in summ:
         print(line(r["case"], r) + ("  ← ได้น้อยกว่า k" if r["selected"] < args.k else ""))
     if len(summ) > 1:
@@ -563,11 +629,14 @@ def main():
             if src not in cache:
                 raw = src.read_bytes()                        # อ่านอย่างเดียว
                 ext = src.suffix.lower()
-                clean = strip_metadata(raw, ext)
+                if ext == ".bmp":                             # แปลง BMP → PNG (ตรวจพิกเซลด้านล่าง)
+                    clean, ext = bmp_to_png(raw), ".png"
+                else:
+                    clean = strip_metadata(raw, ext)
                 s0, h0 = pixels_digest(raw)
                 s1, h1 = pixels_digest(clean)
                 if s0 != s1 or h0 != h1 or tuple(s1) != tuple(size):
-                    sys.exit(f"หยุด: ลบ EXIF แล้วภาพเปลี่ยน ({p.case} {side}) — ไม่สร้างแพ็กเกจ")
+                    sys.exit(f"หยุด: ลบ EXIF/แปลงไฟล์แล้วพิกเซลเปลี่ยน ({p.case} {side}) — ไม่สร้างแพ็กเกจ")
                 with Image.open(io.BytesIO(clean)) as im:
                     if exif_orientation(im) not in (None, 1) or len(im.getexif()):
                         sys.exit(f"หยุด: ลบ EXIF ไม่หมด ({p.case} {side})")
@@ -584,9 +653,11 @@ def main():
         key_rows.append({
             "task_id": tid, "case": p.case, "annotation_id": p.ann_id, "image_id": p.image_id,
             "xray_file": out["xray"][3].name, "fluoro_file": out["fluoro"][3].name, "fluo_id": p.fluo_id,
-            "fluo_match": p.match, "box_xyxy": json.dumps(p.box_xyxy), "is_repeat_of": e["is_repeat_of"] or "",
+            "fluo_match": p.match, "fluo_flag": p.flag, "box_xyxy": json.dumps(p.box_xyxy), "is_repeat_of": e["is_repeat_of"] or "",
             "xray_sha256_source": out["xray"][1], "fluoro_sha256_source": out["fluoro"][1],
             "xray_sha256_package": out["xray"][2], "fluoro_sha256_package": out["fluoro"][2],
+            "xray_converted": "bmp->png lossless, pixels identical" if p.xray_path.suffix.lower() == ".bmp" else "",
+            "fluoro_converted": "bmp->png lossless, pixels identical" if p.fluoro_path.suffix.lower() == ".bmp" else "",
             "notes": "; ".join(p.notes),
         })
         loose = p.fluo_id if p.match == "loose_digits" else None
@@ -602,12 +673,12 @@ def main():
         w.writerows(key_rows)
     with report_csv.open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["case", "annotation_id", "image_id", "xray_file_coco", "fluo_id", "fluo_match", "status", "category", "problems", "notes", "chosen_task"])
+        w.writerow(["case", "annotation_id", "image_id", "xray_file_coco", "fluo_id", "fluo_match", "fluo_flag", "status", "category", "problems", "notes", "chosen_task"])
         chosen_task = {}
         for e in entries:
             chosen_task.setdefault(id(e["pair"]), e["task_id"])
         for p in all_pairs:
-            w.writerow([p.case, p.ann_id, p.image_id, p.xray_name_coco, p.fluo_id, p.match,
+            w.writerow([p.case, p.ann_id, p.image_id, p.xray_name_coco, p.fluo_id, p.match, p.flag,
                         "ok" if p.ok else "excluded", categorize(p.problems[0]) if p.problems else "",
                         "; ".join(p.problems), "; ".join(p.notes), chosen_task.get(id(p), "")])
     with summary_csv.open("w", newline="", encoding="utf-8-sig") as f:
