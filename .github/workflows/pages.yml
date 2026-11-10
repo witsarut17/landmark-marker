@@ -1,0 +1,35 @@
+# เผยแพร่เฉพาะโฟลเดอร์ marker/ (ตัวเว็บ) ขึ้น GitHub Pages
+# ไม่มีภาพหรือข้อมูลผู้ป่วยในเว็บ — ตรวจด้วย tools/check_publish.py ก่อนทุกครั้ง
+name: Deploy marker to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["marker/**", "tools/check_publish.py", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Safety check (no patient data in marker/)
+        run: python3 tools/check_publish.py --pages-only
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: marker
+      - id: deployment
+        uses: actions/deploy-pages@v4
