@@ -257,3 +257,10 @@
 - `make_study_package.py --splits splits.csv [--split test] [--expect ...]`: ตรวจด้วย check_splits ก่อน ไม่ผ่าน = หยุดก่อนอ่านภาพ · ใช้เคสชุด test เรียงตามชื่อ
 - เทสต์ `tests/test_splits.py` 21 รายการ (ข้อมูลปลอม) · ยังไม่ได้รันกับข้อมูลจริง (ยังไม่มี splits.csv)
 - จำนวนงานจริงอาจน้อยกว่า 231: เคสที่ผ่านตรวจคุณภาพไม่ถึง 3 คู่ ใช้เท่าที่มี (dry-run แสดง "ได้น้อยกว่า k")
+
+## GitHub Pages ขึ้นแล้ว (2026-11-10)
+- repo `witsarut17/landmark-marker` · เว็บ https://witsarut17.github.io/landmark-marker/ (ตรวจแล้ว config.js = 0.6.0) · commit ด้วยอีเมล noreply
+- push ครั้งแรกผู้ใช้ทำเอง (ต้องล็อกอินผ่านเบราว์เซอร์) · ครั้งต่อไป Claude push ได้ (Git Credential Manager จำไว้)
+- Pages deploy เฉพาะเมื่อ push ที่แตะ `marker/**` (ดู pages.yml) — แก้เอกสารอย่างเดียวไม่ deploy ใหม่
+- คู่มือหมอใส่ลิงก์แล้ว · ทดสอบ iPad รอบ 2 ผ่านลิงก์จริง: `IPAD_TEST_PAGES.md` (เน้นปุ่มบันทึกลงแอปไฟล์ซึ่งต้องใช้ https) · ภาพทดสอบ: `serve_lan.py --make-zip` → `tests/generated/pelnav_testdata.zip` (gitignored) ส่งเข้า iPad ทางอีเมล/Drive
+- เปิดจากไอคอนของลิงก์ใหม่ = คนละที่เก็บกับไอคอนจากรอบ LAN (คนละ origin) → ให้ลบไอคอนเก่า
