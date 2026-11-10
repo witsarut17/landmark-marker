@@ -1,0 +1,51 @@
+# ===== ห้ามขึ้น GitHub เด็ดขาด: ข้อมูลผู้ป่วย / ตารางจับคู่รหัส =====
+study_package/
+**/study_package/
+key.csv
+**/key.csv
+study_check/
+pilot_package/
+pilot_key.csv
+pilot_check/
+pilot_report.csv
+*_key.csv
+*_check/
+*_summary_by_case.csv
+*_report.csv
+package_report*.txt
+all_case.xlsx
+case_*/
+instances*.json
+*.dcm
+
+# ไฟล์ที่เว็บส่งออก (มีพิกัดของงานจริง เก็บกับทีม ไม่ขึ้น repo)
+marks_*.csv
+marks_*.json
+backup_*.json
+
+# ภาพทดสอบสังเคราะห์ สร้างใหม่ได้ด้วย tests/make_test_images.py
+tests/generated/
+
+# Python / editor
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# เอกสารโครงการภายใน (มีชื่อ-รหัสนักศึกษา ที่ปรึกษา โรงพยาบาล เลขจริยธรรม) — ไม่ขึ้น repo public
+PROJECT_BRIEF.md
+# ตารางแบ่งชุด / Excel / คำต้องห้ามสำหรับตรวจก่อนเผยแพร่
+splits*.csv
+**/splits*.csv
+*.xlsx
+*.xls
+tools/private_terms.txt
+# ตำแหน่งโฟลเดอร์ข้อมูลจริงในเครื่องนี้
+tools/data_root.txt
+# กลุ่มเคสที่สงสัยว่าเป็นผู้ป่วยคนเดียวกัน (มีรหัสเคส)
+tools/same_patient_groups.txt
+
+# หน้าพิมพ์คู่มือแพทย์ (สร้างใหม่ได้ด้วย tools/print_guide.py)
+DOCTOR_GUIDE_print.html

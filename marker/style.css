@@ -1,0 +1,291 @@
+:root {
+  --bg: #1b1d21;
+  --panel: #26292f;
+  --line: #3a3e46;
+  --text: #e8e8ea;
+  --muted: #9aa0aa;
+  --accent: #2f7cf6;
+  --danger: #e5484d;
+  --touch: 44px;            /* เป้าสัมผัสขั้นต่ำ */
+}
+
+* { box-sizing: border-box; }
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", "Noto Sans Thai", sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  height: 100vh;
+  height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+img, canvas { image-orientation: none; }   /* ห้ามหมุนตาม EXIF (กันไว้อีกชั้น) */
+
+/* ---------- ปุ่ม ---------- */
+.btn {
+  min-height: var(--touch);
+  min-width: var(--touch);
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.btn:active { filter: brightness(1.25); }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-ghost { background: transparent; }
+.btn-small { min-height: 36px; padding: 0 10px; font-size: 13px; }
+.btn-big { min-height: 52px; padding: 0 20px; font-size: 16px; }
+
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+
+/* ---------- แถบบน ---------- */
+#topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+#topbar .group { display: flex; align-items: center; gap: 8px; }
+/* ข้อความที่เปลี่ยนได้บนแถบบน: ความกว้างคงที่ -> แถบบนตัดบรรทัดเหมือนเดิมเสมอ ช่องภาพไม่ขยับ */
+.task-label { font-weight: 700; font-size: 18px; width: 120px; white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; }
+#progress { display: inline-block; width: 96px; white-space: nowrap; overflow: hidden; }
+#saveLabel { display: inline-block; width: 112px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#btnFinger { width: 150px; }
+
+.btn[aria-pressed="true"] { background: #1f5130; border-color: #3ddc84; }
+
+/* ---------- แถบคำแนะนำ ---------- */
+/* ความสูงคงที่ 1 บรรทัด: ข้อความเปลี่ยนแล้วช่องภาพต้องไม่เปลี่ยนขนาด */
+#hintBar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 16px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* ข้อความยาวได้ 2 บรรทัดในแถบสูงคงที่ 44px (ไม่ทำให้ช่องภาพเปลี่ยนขนาด) */
+#hintText { font-weight: 600; min-width: 0; overflow: hidden; white-space: normal; font-size: 15px; line-height: 19px;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+#pairCount { flex: none; }
+#btnNote { flex: none; margin-left: auto; min-width: 104px; min-height: 34px; }
+#btnNote.has-note { border-color: #ffd400; color: #ffd400; }
+#howTo { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }   /* หดก่อนคำแนะนำหลัก */
+.tip { margin: 10px 0; padding: 8px 12px; border-left: 4px solid #3fb6ff; background: #3fb6ff1a; border-radius: 6px; font-size: 15px; }
+textarea.text-input { resize: vertical; min-height: 80px; line-height: 1.4; }
+@media (max-width: 1100px) { #howTo { display: none; } }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  font-weight: 800;
+  color: #000;
+  background: transparent;
+}
+.chip:empty { display: none; }
+
+/* ---------- ข้อความแจ้งสั้น ๆ ---------- */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 15;
+  max-width: calc(100vw - 32px);
+  padding: 12px 18px;
+  border-radius: 12px;
+  background: #000d;
+  border: 1px solid var(--line);
+  font-size: 16px;
+  pointer-events: none;
+}
+#toast[hidden] { display: none; }
+
+/* ---------- พื้นที่ทำงาน: แนวนอน = ซ้าย/ขวา, แนวตั้ง = บน/ล่าง ---------- */
+#workspace {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+  gap: 4px;
+  min-height: 0;
+  padding: 4px;
+}
+@media (orientation: portrait) {
+  #workspace { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+}
+.pane {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+  min-height: 0;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.pane-head {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+  height: 46px;                 /* คงที่ (ดู #hintBar) */
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.pane-head strong, .pane-head .btn { flex: none; }
+.readout {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  font: 13px/20px ui-monospace, Consolas, Menlo, monospace;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.viewer {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  contain: strict;              /* ขนาดไม่ขึ้นกับสิ่งที่อยู่ข้างใน */
+}
+.viewer-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;                 /* ให้โค้ดจัดการ pinch/pan เอง */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  cursor: crosshair;
+}
+
+.warn { color: #ffcc33; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.warn:empty { display: none; }
+
+/* ---------- แผงปรับภาพ (ลอยทับ ไม่กระทบ layout) ---------- */
+.adjust-pop {
+  position: absolute;
+  top: 50px;
+  right: 8px;
+  z-index: 5;
+  width: min(300px, calc(100% - 16px));
+  padding: 12px;
+  background: #000e;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+}
+.adjust-pop[hidden] { display: none; }
+.adjust-pop label { display: grid; gap: 4px; font-size: 14px; }
+.adjust-pop label.check { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.adjust-pop input[type="range"] { width: 100%; height: 36px; }
+.adjust-pop input[type="checkbox"] { width: 24px; height: 24px; }
+.adjust-pop .row { margin: 0; }
+
+/* ---------- หน้าต่างทับ ---------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(10, 11, 13, 0.92);
+  overflow: auto;
+}
+.overlay[hidden] { display: none; }
+.card {
+  width: min(640px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px 22px;
+}
+.card h1 { font-size: 22px; margin: 0 0 10px; }
+.card h2 { font-size: 20px; margin: 0 0 10px; }
+.card-error { border: 2px solid var(--danger); }
+.card-error h2 { color: var(--danger); }
+.card ul { padding-left: 20px; max-height: 50vh; overflow: auto; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.small-h { font-size: 16px; margin: 18px 0 4px; }
+.file-btn.disabled { opacity: 0.35; pointer-events: none; }
+.box-warn { border: 2px solid #ffcc33; border-radius: 10px; padding: 10px 14px; margin: 10px 0; background: #ffcc3312; }
+.box-err { border: 2px solid var(--danger); border-radius: 10px; padding: 10px 14px; margin: 10px 0; background: #e5484d18; }
+.saved-item { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 8px 0; font-size: 14px; }
+.saved-item b { font-size: 15px; }
+.err-text { color: #ff8a8a; font-weight: 700; }
+.ok-text { color: #6fe39a; }
+#saveLabel.err { color: #ff8a8a; font-weight: 700; }
+.reasons { display: grid; gap: 6px; margin: 8px 0; }
+.reasons label { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; }
+.reasons input[type="radio"] { width: 22px; height: 22px; }
+.text-input { width: 100%; min-height: 44px; padding: 8px 10px; font: inherit; color: var(--text); background: #0006; border: 1px solid var(--line); border-radius: 10px; }
+.summary { font-size: 14px; line-height: 1.6; }
+.summary td { padding: 2px 10px 2px 0; }
+.status { white-space: pre-line; font-size: 14px; }
+.status.err { color: var(--danger); }
+code { background: #0003; padding: 1px 5px; border-radius: 4px; }
+
+/* ---------- ดีบัก ---------- */
+#debugPanel {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  z-index: 20;
+  width: min(520px, calc(100vw - 16px));
+  max-height: 60vh;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  background: #000e;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font: 12px/1.35 ui-monospace, Consolas, Menlo, monospace;
+}
+#debugPanel[hidden] { display: none; }
+.debug-head { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.debug-head strong { flex: 1; }
+#debugPanel pre { margin: 0; padding: 6px 8px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+#debugInfo { color: #8fd; border-bottom: 1px solid var(--line); }
+#debugLog .e { color: #ff8a8a; }

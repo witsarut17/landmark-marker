@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<!-- ไม่มีการโหลดอะไรจากภายนอก: ไม่มี CDN, ไม่มี analytics, ไม่มีฟอนต์ภายนอก -->
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' blob: data:; connect-src 'none'; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="PelNav Marker">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<title>PelNavPlan Landmark Marker</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header id="topbar">
+  <div class="group">
+    <button id="btnOpen" class="btn" title="หน้าแรก / เปิดแพ็กเกจ / นำเข้าไฟล์สำรอง">หน้าแรก</button>
+    <span id="taskLabel" class="task-label">— / —</span>
+    <span id="progress" class="muted"></span>
+  </div>
+  <div class="group">
+    <button id="btnPrev" class="btn" disabled>◀ ก่อนหน้า</button>
+    <button id="btnNext" class="btn btn-primary" disabled>ถัดไป ▶</button>
+    <button id="btnUnmarkable" class="btn" disabled>มาร์กไม่ได้</button>
+  </div>
+  <div class="group">
+    <button id="btnUndo" class="btn" disabled title="ย้อนการกระทำล่าสุด (Ctrl+Z)">↶ ย้อน</button>
+    <button id="btnDelete" class="btn" disabled title="ลบจุดที่เลือก (Delete)">ลบจุด</button>
+    <button id="btnFinger" class="btn" aria-pressed="false" title="เปิดเมื่อไม่ได้ใช้ Apple Pencil">นิ้ววางจุด: ปิด</button>
+  </div>
+  <div class="group">
+    <button id="btnExport" class="btn" disabled>ส่งออก</button>
+    <button id="btnFinish" class="btn" disabled>จบงาน</button>
+    <span id="saveLabel" class="muted small"></span>
+    <button id="btnDebug" class="btn btn-ghost" title="แผงดีบัก">ดีบัก</button>
+  </div>
+</header>
+
+<div id="hintBar">
+  <span id="hintChip" class="chip"></span>
+  <span id="hintText">เปิดแพ็กเกจเพื่อเริ่ม</span>
+  <span id="pairCount" class="muted"></span>
+  <span id="warnText" class="warn"></span>
+  <button id="btnNote" class="btn btn-small" disabled title="หมายเหตุสั้น ๆ ของงานนี้ (ไม่บังคับ)">หมายเหตุ</button>
+  <span id="howTo" class="muted small"></span>
+</div>
+
+<main id="workspace">
+  <section class="pane" id="paneX">
+    <div class="pane-head">
+      <strong>เอกซเรย์</strong>
+      <span class="readout" id="readoutX">—</span>
+      <button class="btn btn-small" id="btnXView">ดูทั้งภาพ</button>
+      <button class="btn btn-small" data-adjust="xray">ปรับภาพ</button>
+    </div>
+    <div class="viewer" id="viewerX"></div>
+    <div class="adjust-pop" id="adjustX" hidden>
+      <label>ความสว่าง <input type="range" min="0.5" max="2" step="0.05" value="1" data-k="brightness"></label>
+      <label>ความเปรียบต่าง <input type="range" min="0.5" max="3" step="0.05" value="1" data-k="contrast"></label>
+      <label class="check"><input type="checkbox" id="chkBox" checked> แสดงกรอบ (เส้นประ)</label>
+      <div class="row"><button class="btn btn-small" data-adjust-reset>ค่าเริ่มต้น</button><button class="btn btn-small" data-adjust-close>ปิด</button></div>
+    </div>
+  </section>
+  <section class="pane" id="paneF">
+    <div class="pane-head">
+      <strong>ฟลู</strong>
+      <span class="readout" id="readoutF">—</span>
+      <button class="btn btn-small" data-reset="fluoro">รีเซ็ตมุมมอง</button>
+      <button class="btn btn-small" data-adjust="fluoro">ปรับภาพ</button>
+    </div>
+    <div class="viewer" id="viewerF"></div>
+    <div class="adjust-pop" id="adjustF" hidden>
+      <label>ความสว่าง <input type="range" min="0.5" max="2" step="0.05" value="1" data-k="brightness"></label>
+      <label>ความเปรียบต่าง <input type="range" min="0.5" max="3" step="0.05" value="1" data-k="contrast"></label>
+      <label class="check"><input type="checkbox" data-k="invert"> กลับสีภาพ</label>
+      <div class="row"><button class="btn btn-small" data-adjust-reset>ค่าเริ่มต้น</button><button class="btn btn-small" data-adjust-close>ปิด</button></div>
+    </div>
+  </section>
+</main>
+
+<!-- หน้าแรก -->
+<div id="startScreen" class="overlay">
+  <div class="card">
+    <h1>PelNavPlan · มาร์กจุดอ้างอิง</h1>
+    <p class="small muted">ภาพเปิดในเครื่องนี้เท่านั้น ไม่ถูกส่งไปที่ใด · งานบันทึกในเครื่องอัตโนมัติ</p>
+    <div id="storageStatus" class="status"></div>
+    <div id="savedList"></div>
+    <div id="noDataBox" class="box-warn" hidden>
+      <b>ไม่พบงานที่บันทึกไว้ในเครื่องนี้</b><br>
+      ถ้าเคยทำไว้ (เครื่องอื่น หรือข้อมูลถูกลบ) ให้ <b>นำเข้าไฟล์สำรอง</b> ก่อนเริ่มงาน
+      <div class="row">
+        <label class="btn btn-primary btn-big file-btn">นำเข้าไฟล์สำรอง
+          <input type="file" class="inputBackup" accept=".json,application/json" hidden></label>
+      </div>
+    </div>
+    <h2 class="small-h">เปิดแพ็กเกจภาพ</h2>
+    <p class="small">เลือก <b>ทุกไฟล์</b> ในโฟลเดอร์แพ็กเกจ (รวม <code>manifest.json</code>)</p>
+    <div class="row">
+      <label class="btn btn-primary btn-big file-btn" id="filesLabel">
+        เลือกไฟล์ทั้งหมด
+        <input type="file" id="inputFiles" multiple hidden>
+      </label>
+      <label class="btn btn-big file-btn" id="folderLabel">
+        เลือกทั้งโฟลเดอร์
+        <input type="file" id="inputFolder" webkitdirectory multiple hidden>
+      </label>
+      <label class="btn btn-big file-btn" id="backupLabel">
+        นำเข้าไฟล์สำรอง
+        <input type="file" class="inputBackup" accept=".json,application/json" hidden>
+      </label>
+    </div>
+    <p class="muted small" id="ipadHint">บน iPad: กด "เลือกไฟล์ทั้งหมด" → "เรียกดู/Files" (ไม่ใช่คลังรูปภาพ) → เข้าโฟลเดอร์แพ็กเกจ → "เลือก" → "เลือกทั้งหมด" → "เปิด"</p>
+    <p class="tip"><b>คำแนะนำ:</b> เลือกจุดที่ชัดและไม่เปลี่ยนรูปตามมุมถ่าย เช่น ขอบรูกระดูก ปลายสกรู มุมแผ่นโลหะ · กระจายให้ทั่วกรอบ · ต้องเห็นชัดทั้งสองภาพ</p>
+    <div id="loadStatus" class="status"></div>
+    <div class="row" id="startCloseRow" hidden><button id="btnStartClose" class="btn">ปิด กลับไปทำงานต่อ</button></div>
+  </div>
+</div>
+
+<!-- หน้าต่างถาม/เลือก (ใช้ร่วมกัน) -->
+<div id="dialog" class="overlay" hidden>
+  <div class="card" role="dialog" aria-labelledby="dialogTitle">
+    <h2 id="dialogTitle"></h2>
+    <div id="dialogBody"></div>
+    <div class="row" id="dialogButtons"></div>
+  </div>
+</div>
+
+<!-- หน้าต่างข้อผิดพลาดที่ต้องหยุด -->
+<div id="errorModal" class="overlay" hidden>
+  <div class="card card-error" role="alertdialog" aria-labelledby="errorTitle">
+    <h2 id="errorTitle">หยุด</h2>
+    <ul id="errorList"></ul>
+    <div class="row"><button id="btnErrorClose" class="btn btn-primary btn-big">รับทราบ</button></div>
+  </div>
+</div>
+
+<div id="toast" role="status" hidden></div>
+
+<!-- แผงดีบัก (ดูข้อผิดพลาดบน iPad ได้โดยไม่ต้องใช้ Mac) -->
+<aside id="debugPanel" hidden>
+  <div class="debug-head">
+    <strong>ดีบัก</strong>
+    <button id="btnDebugClear" class="btn btn-small">ล้าง</button>
+    <button id="btnDebugClose" class="btn btn-small">ปิด</button>
+  </div>
+  <pre id="debugInfo"></pre>
+  <pre id="debugLog"></pre>
+</aside>
+
+<script src="config.js"></script>
+<script src="viewer.js"></script>
+<script src="loader.js"></script>
+<script src="store.js"></script>
+<script src="exporter.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
