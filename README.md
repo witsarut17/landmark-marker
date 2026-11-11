@@ -127,6 +127,10 @@ _(รอสรุปกับอาจารย์ตามเงื่อนไ
 
 ---
 
+## คู่มือฉบับเต็มสำหรับอาจารย์ (PDF)
+
+`.venv\Scripts\python tools/make_manual.py` → `manual_out/คู่มือการใช้งาน_เว็บมาร์กจุดอ้างอิง.pdf` · ถ่ายภาพหน้าจออัตโนมัติจากเว็บจริง (GitHub Pages) ด้วยภาพทดสอบสังเคราะห์ ทั้งคอมพิวเตอร์และ iPad (จำลอง) · PDF และภาพไม่ขึ้น git
+
 ## สำหรับแพทย์ (iPad + Safari)
 
 **คู่มือสำหรับพิมพ์: [DOCTOR_GUIDE.md](DOCTOR_GUIDE.md)** — หน้า 1 iPad · หน้า 2 MacBook (พิมพ์แยกหน้าได้) (`python tools/print_guide.py` → เปิด `DOCTOR_GUIDE_print.html` ใน Edge → Ctrl+P) · ด้านล่างคือฉบับละเอียด
