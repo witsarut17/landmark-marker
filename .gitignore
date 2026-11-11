@@ -49,3 +49,9 @@ tools/same_patient_groups.txt
 
 # หน้าพิมพ์คู่มือแพทย์ (สร้างใหม่ได้ด้วย tools/print_guide.py)
 DOCTOR_GUIDE_print.html
+
+# คู่มือฉบับเต็ม (PDF + ภาพหน้าจอ) สร้างใหม่ได้ด้วย tools/make_manual.py — ไม่ขึ้น git
+manual_out/
+*.pdf
+# ฟอนต์ที่ดาวน์โหลดมาใช้สร้างคู่มือ
+.cache/
