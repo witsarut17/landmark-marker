@@ -91,8 +91,8 @@
     const mf = byName.get('manifest.json');
     if (!mf) throw new BlockingError('ไม่พบไฟล์ manifest.json', ['ต้องเลือก manifest.json มาพร้อมกับภาพทั้งหมด']);
 
-    let manifest;
-    try { manifest = JSON.parse(await mf.text()); }
+    let manifest, manifestText;
+    try { manifestText = await mf.text(); manifest = JSON.parse(manifestText); }
     catch (e) { throw new BlockingError('อ่าน manifest.json ไม่ได้', [String(e.message || e)]); }
 
     const errors = validateManifest(manifest);
@@ -109,7 +109,16 @@
     const used = new Set(['manifest.json']);
     manifest.items.forEach((it) => { used.add(it.xray); used.add(it.fluoro); });
     const extra = [...byName.keys()].filter((n) => !used.has(n));
-    return { manifest, byName, extra };
+    return { manifest, manifestText, byName, extra };
+  }
+
+  // manifest ที่เก็บไว้ในเครื่อง (เปิดงานต่อโดยไม่ต้องเลือกไฟล์) — ตรวจแบบเดียวกับตอนเลือกไฟล์
+  function parseStoredManifest(text) {
+    let manifest;
+    try { manifest = JSON.parse(text); } catch (e) { throw new BlockingError('manifest ที่เก็บในเครื่องอ่านไม่ได้', [String(e.message || e)]); }
+    const errors = validateManifest(manifest);
+    if (errors.length) throw new BlockingError('manifest ที่เก็บในเครื่องไม่ถูกต้อง', errors);
+    return manifest;
   }
 
   // ---------- EXIF Orientation (อ่านจากไบต์เอง) ----------
@@ -219,5 +228,5 @@
     return { img, url, W, H, hasExif: info.hasExif };
   }
 
-  window.Loader = { BlockingError, FileAccessError, probeReadable, openPackage, validateManifest, loadImage, _jpegExif: jpegExif, _pngExif: pngExif };
+  window.Loader = { BlockingError, FileAccessError, probeReadable, openPackage, parseStoredManifest, validateManifest, loadImage, _jpegExif: jpegExif, _pngExif: pngExif };
 })();
