@@ -9,7 +9,7 @@
 วิธีใช้:
     python tests/make_test_images.py          # ครั้งแรก (สร้างภาพทดสอบ)
     .venv\\Scripts\\python tools/make_manual.py
-    .venv\\Scripts\\python tools/make_manual.py --site http://127.0.0.1:8000/   # ใช้เว็บในเครื่องแทน
+    .venv\\Scripts\\python tools/make_manual.py --capture-from http://127.0.0.1:8000/marker/   # ถ่ายจากเว็บในเครื่อง (ก่อน push)
 """
 
 from __future__ import annotations
@@ -377,7 +377,8 @@ def center_of(p, sel):
 
 
 # ---------------------------------------------------------------- ถ่ายภาพทุกขั้น
-def capture(site: str, m: Manual, marks=None):
+def capture(site: str, m: Manual, marks=None, shown: str | None = None):
+    shown = shown or site          # ลิงก์ที่พิมพ์ในคู่มือ (ถ่ายภาพจากเว็บในเครื่องได้ แต่คู่มือแสดงลิงก์จริง)
     T = targets()
     with sync_playwright() as pw:
         br = pw.chromium.launch(channel="msedge")
@@ -388,7 +389,7 @@ def capture(site: str, m: Manual, marks=None):
         p.goto(site)
         p.wait_for_selector("body[data-ready='1']")
         m.section("เปิดเว็บ และเพิ่มไอคอนบนหน้าจอโฮมของ iPad",
-                  f"ลิงก์เว็บคือ {site} เปิดได้ทั้งบนคอมพิวเตอร์และบน iPad")
+                  f"ลิงก์เว็บคือ {shown} เปิดได้ทั้งบนคอมพิวเตอร์และบน iPad")
         m.shot(p, "เปิดเว็บบนคอมพิวเตอร์",
                "เปิดลิงก์ด้วย Chrome หรือ Edge หมายเลข 1 บอกว่าเครื่องนี้บันทึกงานได้ "
                "และหมายเลข 2 แสดงเมื่อเครื่องนี้ยังไม่มีงานที่บันทึกไว้",
@@ -412,7 +413,8 @@ def capture(site: str, m: Manual, marks=None):
         # ===== 3 เปิดแพ็กเกจ =====
         m.section("เปิดแพ็กเกจภาพ",
                   "แพ็กเกจภาพคือโฟลเดอร์ที่ทีมวิจัยเตรียมให้ ภายในมีภาพเอกซเรย์และภาพฟลูออโรสโคปีของทุกงาน "
-                  "ชื่อไฟล์เป็นรหัสงาน ไม่มีชื่อหรือรหัสผู้ป่วย")
+                  "ชื่อไฟล์เป็นรหัสงาน ไม่มีชื่อหรือรหัสผู้ป่วย ทีมวิจัยจะเปิดแพ็กเกจให้แพทย์ในครั้งแรก "
+                  "แล้วเว็บจะเก็บภาพไว้ในเครื่อง ครั้งต่อไปแพทย์กด ทำงานต่อ ได้เลยโดยไม่ต้องเลือกไฟล์")
         m.shot(p, "เปิดแพ็กเกจบนคอมพิวเตอร์",
                "กด **เลือกทั้งโฟลเดอร์** (หมายเลข 1) แล้วเลือกโฟลเดอร์แพ็กเกจ หากเบราว์เซอร์ถามให้อัปโหลด ให้กด **อัปโหลด** "
                "ภาพจะเปิดในเครื่องนี้เท่านั้น",
@@ -421,6 +423,16 @@ def capture(site: str, m: Manual, marks=None):
                "กด **เลือกไฟล์ทั้งหมด** (หมายเลข 1) แล้วกด **เรียกดู** เข้าโฟลเดอร์แพ็กเกจ "
                "จากนั้นกด **เลือก** กด **เลือกทั้งหมด** และกด **เปิด**",
                [el("#filesLabel", 1)], device="iPad")
+        # แพ็กเกจทดสอบเล็กมาก เก็บเสร็จเร็วจนถ่ายไม่ทัน จึงแสดงกล่องความคืบหน้าจริงของเว็บค้างไว้ที่ 5 จาก 12 ไฟล์
+        n_files = 2 * len(json.loads((GEN / "test_package" / "manifest.json").read_text(encoding="utf-8"))["items"])
+        p.evaluate("""(n) => { const b = document.getElementById('importBar'); b.max = n; b.value = 5;
+            document.getElementById('importText').textContent = `5/${n} ไฟล์ · 2 MB`;
+            document.getElementById('importBox').hidden = false; }""", n_files)
+        m.shot(p, "เก็บภาพไว้ในเครื่อง (ครั้งแรกครั้งเดียว)",
+               "เมื่อเปิดแพ็กเกจครั้งแรก เว็บจะเก็บภาพไว้ในเครื่องพร้อมแถบความคืบหน้า (หมายเลข 1) "
+               "ระหว่างนี้ไม่ควรปิดเว็บหรือสลับแอป",
+               [el("#importBox", 1)])
+        p.evaluate("() => { document.getElementById('importBox').hidden = true; }")
         open_pkg(p)
         # หน้าที่ต้องเห็นตัวภาพ ใช้ภาพจริงจากแพ็กเกจตัวอย่าง (ถ้ามีไฟล์จุดของทีม) — rp = หน้าเว็บที่เปิดแพ็กเกจตัวอย่าง
         R = " (ภาพจริง)" if marks else ""
@@ -706,15 +718,22 @@ def capture(site: str, m: Manual, marks=None):
 
         # ===== 13 กลับมาทำต่อ / นำเข้า =====
         m.section("กลับมาทำต่อ และการนำเข้าไฟล์สำรอง")
+        # ในเครื่องจำลองนี้เปิดมา 2 แพ็กเกจ — เก็บภาพไว้เฉพาะแพ็กเกจล่าสุดเหมือนเครื่องแพทย์จริง
+        p.evaluate("""async () => { const l = await window.ImageStore.listRecords();
+            l.sort((a, b) => ((a.stored_at || '') < (b.stored_at || '') ? -1 : 1));
+            for (const r of l.slice(0, -1)) await window.ImageStore.removePackage(r.package_id); }""")
         p.close()
         p = cd.new_page()
         p.goto(site)
         p.wait_for_selector("body[data-ready='1']")
+        p.wait_for_selector("#btnResume")
         p.wait_for_timeout(300)
         m.shot(p, "เปิดเว็บเพื่อทำต่อในวันอื่น",
                "เปิดเว็บด้วยเครื่องและเบราว์เซอร์เดิม หน้าแรกจะแสดงงานที่ทำไว้ (หมายเลข 1) "
-               "เมื่อเลือกแพ็กเกจเดิม (หมายเลข 2) เว็บจะกลับไปงานล่าสุด",
-               [el("#savedList", 1), el("#folderLabel", 2)])
+               "กด **ทำงานต่อ** (หมายเลข 2) แล้วเว็บจะกลับไปงานล่าสุด",
+               [el("#savedList", 1), el("#btnResume", 2)])
+        m.note("หากหน้าแรกแสดงกรอบสีแดงว่าภาพในเครื่องไม่ครบหรือหายไป ให้ติดต่อทีมวิจัยเพื่อเปิดแพ็กเกจใหม่ "
+               "จุดที่มาร์กไว้ไม่หาย")
         cn = br.new_context(viewport=DESKTOP, device_scale_factor=1.5, bypass_csp=True)
         n = cn.new_page()
         n.goto(site)
@@ -731,6 +750,29 @@ def capture(site: str, m: Manual, marks=None):
         n.click("#dialogButtons button >> nth=0")
         n.wait_for_timeout(400)
         cn.close()
+
+        # ===== ลบภาพออกจากเครื่อง =====
+        m.section("ลบภาพออกจากเครื่องเมื่อทำงานครบ",
+                  "เมื่อแพทย์ทำครบทุกงานและส่งไฟล์สำรองให้ทีมวิจัยแล้ว ทีมวิจัยจะลบภาพออกจากเครื่องของแพทย์ให้ "
+                  "การลบนี้ลบเฉพาะภาพ ส่วนจุดที่มาร์กไว้ยังอยู่ในเครื่อง")
+        p.click("#btnDeleteImages")
+        wait_dialog(p)
+        m.shot(p, "กดลบภาพออกจากเครื่อง",
+               "ที่หน้าแรก กด **ลบภาพออกจากเครื่อง** เว็บจะเตือนให้สำรองไฟล์ก่อน (หมายเลข 1) "
+               "เมื่อสำรองแล้วให้กด **ลบภาพต่อ** (หมายเลข 2)",
+               [el("#btnDelExportFirst", 1), el("#btnDelNext", 2)])
+        p.click("#btnDelNext")
+        wait_dialog(p)
+        m.shot(p, "ยืนยันการลบอีกครั้ง",
+               "กด **ลบภาพ** (หมายเลข 1) เพื่อยืนยัน ภาพจะถูกลบออกจากเครื่อง หากกดผิดให้กด **ยกเลิก**",
+               [el("#btnDelConfirm", 1)])
+        p.click("#btnDelConfirm")
+        p.wait_for_function("() => document.getElementById('localBox').hidden", timeout=10000)
+        p.wait_for_timeout(300)
+        m.shot(p, "หลังลบภาพ",
+               "กรอบภาพในเครื่องหายไป ส่วนงานที่ทำไว้ยังแสดงอยู่ (หมายเลข 1) "
+               "หากจะทำงานต่อภายหลัง ต้องเปิดแพ็กเกจใหม่",
+               [el("#savedList", 1)])
 
         # ===== 14 สำหรับอาจารย์ =====
         cb = br.new_context(viewport=DESKTOP, device_scale_factor=1.5, bypass_csp=True)
@@ -823,7 +865,8 @@ BUTTON_TABLE = ('<table class="btns"><tr><th>หมายเลข</th><th>ป�
 OVERVIEW_1 = ("เว็บมาร์กจุดอ้างอิงใช้ให้ศัลยแพทย์วางจุดอ้างอิงที่ตรงกัน 4 คู่ บนภาพเอกซเรย์ก่อนผ่าตัดและภาพฟลูออโรสโคปีระหว่างผ่าตัด "
               "ของผู้ป่วยรายเดียวกันทีละงาน ในชุดทดสอบ 70 ราย จุดอ้างอิงที่ได้ใช้เป็นค่าอ้างอิงในการวัดความแม่นยำของวิธีจัดวางภาพในงานวิจัย "
               "และงานส่วนหนึ่งจะแสดงซ้ำโดยไม่แจ้ง เพื่อใช้วัดความสม่ำเสมอของแพทย์")
-OVERVIEW_2 = ("ภาพจะเปิดดูในเครื่องของแพทย์เท่านั้น ไม่ถูกส่งขึ้นอินเทอร์เน็ต ภาพทุกภาพปิดชื่อและ HN แล้ว และใช้รหัสงานแทนรหัสผู้ป่วย "
+OVERVIEW_2 = ("ภาพจะเปิดดูและเก็บไว้ในเครื่องของแพทย์เท่านั้น ไม่ถูกส่งขึ้นอินเทอร์เน็ต และทีมวิจัยจะลบภาพออกจากเครื่องเมื่อทำงานครบ "
+              "ภาพทุกภาพปิดชื่อและ HN แล้ว และใช้รหัสงานแทนรหัสผู้ป่วย "
               "ผลที่ได้มีเพียงรหัสงานและตำแหน่งจุดเท่านั้น งานจะบันทึกไว้ในเครื่องโดยอัตโนมัติ และแพทย์ส่งไฟล์สำรองให้ทีมวิจัยเมื่อทำงานเสร็จ")
 OVERVIEW_NOTE = ("ภาพหน้าจอทั้งหมดในคู่มือนี้ใช้ภาพทดสอบที่สร้างขึ้น ไม่ใช่ภาพผู้ป่วย "
                  "และเลขในวงกลมสีแดงตรงกับคำอธิบายใต้ภาพ")
@@ -840,11 +883,12 @@ TRYOUT_STEPS = [
     "แล้วคลิกที่จุดเพื่อดูตำแหน่งด้านบนภาพ ตำแหน่งควรคลาดไม่เกิน 1 จึงใช้ตรวจความแม่นยำของการวางจุดได้",
     "ในงาน T006 ภาพฟลูออโรสโคปีเป็นบริเวณในกรอบที่ขยาย หมุน และกลับสี ให้ลองวาง 4 คู่ที่กากบาทที่ตรงกันในทั้งสองภาพ",
     "ลองกด **มาร์กไม่ได้** ลองวาง 3 คู่แล้วกด **ถัดไป** ลองบันทึก **หมายเหตุ** และลองกด **ปรับภาพ**",
-    "ปิดแท็บระหว่างทำงาน แล้วเปิดลิงก์ใหม่ หน้าแรกต้องแสดงงานที่ทำไว้ และเมื่อเปิด test_package อีกครั้ง จุดต้องอยู่ครบ",
+    "ปิดแท็บระหว่างทำงาน แล้วเปิดลิงก์ใหม่ หน้าแรกต้องแสดงงานที่ทำไว้ และกด **ทำงานต่อ** ได้โดยไม่ต้องเลือกไฟล์ จุดต้องอยู่ครบ",
     "เปิด test_package_big แล้วกด **มาร์กไม่ได้** 10 งาน หน้าต่างสำรองไฟล์ต้องแสดงขึ้นเอง ให้ดาวน์โหลดไฟล์สำรองไว้",
     "เปิดเว็บในเบราว์เซอร์อื่น แล้วกด **นำเข้าไฟล์สำรอง** และเลือกไฟล์จากข้อก่อนหน้า งานต้องกลับมาครบ",
     "เปิด bad_size_package และ bad_exif_package เว็บต้องแสดงหน้าต่าง **หยุด** และไม่แสดงภาพ ดังภาพด้านล่าง",
-    "เมื่อทดลองเสร็จ ให้ล้างข้อมูลเว็บไซต์นี้ในเบราว์เซอร์ หรือลบไอคอนทดสอบบน iPad เพื่อไม่ให้ปนกับงานจริง",
+    "เมื่อทดลองเสร็จ ให้กด **ลบภาพออกจากเครื่อง** ที่หน้าแรก แล้วล้างข้อมูลเว็บไซต์นี้ในเบราว์เซอร์ "
+    "หรือลบไอคอนทดสอบบน iPad เพื่อไม่ให้ปนกับงานจริง",
 ]
 
 
@@ -949,7 +993,9 @@ def check_text(page_html: str):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--site", default=SITE)
+    ap.add_argument("--site", default=SITE, help="ลิงก์เว็บที่พิมพ์ในคู่มือ")
+    ap.add_argument("--capture-from", default="",
+                    help="ถ่ายภาพหน้าจอจากเว็บนี้แทน (เช่น เว็บในเครื่องก่อน push) — คู่มือยังแสดงลิงก์ --site")
     ap.add_argument("--sample-marks", default=str(SAMPLE_MARKS) if SAMPLE_MARKS.exists() else "",
                     help="ไฟล์สำรอง (.json) ที่ทีมวางจุดบนแพ็กเกจตัวอย่างภาพจริง — ไม่มี = ใช้ภาพทดสอบทั้งเล่ม")
     args = ap.parse_args()
@@ -965,7 +1011,10 @@ def main():
     marks = load_sample_marks(Path(args.sample_marks)) if args.sample_marks else None
 
     m = Manual()
-    main_full = capture(site, m, marks)
+    shot_site = args.capture_from or site
+    if not shot_site.endswith("/"):
+        shot_site += "/"
+    main_full = capture(shot_site, m, marks, shown=site)
     version = re.search(r"APP_VERSION:\s*'([^']+)'", (ROOT / "marker" / "config.js").read_text(encoding="utf-8")).group(1)
     page_html = build_html(m, site, version, main_full, bool(marks))
     check_text(page_html)

@@ -73,7 +73,12 @@
     storage: { ok: false, reason: 'ยังไม่ได้ตรวจ', persisted: null },
     imagesReady: false, fluoroArea: null,
     lastInteraction: Date.now(), saveError: null, busy: false,
+    source: 'files',      // 'files' = อ่านจากไฟล์ที่เลือก · 'local' = อ่านจากภาพที่เก็บไว้ในเครื่อง (ImageStore)
+    localRec: null,       // record ของ ImageStore (รายชื่อไฟล์ ขนาด SHA-256)
+    importing: false,
   };
+  // สคริปต์ทดสอบปิดการเก็บภาพในเครื่องได้ (ทดสอบโหมดอ่านจากไฟล์ที่เลือก)
+  const localImagesOn = () => CFG.localImages.enabled && !window.__PELNAV_NO_LOCAL_IMAGES && !!window.indexedDB;
   try {
     state.fingerMode = localStorage.getItem('fingerMode') === '1';
     state.showBox = localStorage.getItem('showBox') !== '0';
@@ -570,26 +575,32 @@
     returnBusy = true;
     try {
       save();
+      if (state.source === 'local') return;          // ภาพในเครื่อง ไม่มีปัญหา iPad ปล่อยไฟล์
       const it = currentItem();
       const f = it && state.byName && state.byName.get(it.xray);
       if (f && !(await Loader.probeReadable(f))) await filesLost();
     } finally { returnBusy = false; }
   }
 
+  // kind 'files' = iPad ปล่อยไฟล์ที่เลือกไว้ · 'local' = ภาพที่เก็บในเครื่องหาย ไม่ครบ หรือเสีย
   let filesLostOpen = false;
-  async function filesLost() {
+  async function filesLost(kind = 'files', why = '') {
     if (filesLostOpen) return;
     filesLostOpen = true;
     await save();
     const it = currentItem();
-    Debug.error('อ่านไฟล์ภาพที่เลือกไว้ไม่ได้แล้ว (iPad ปล่อยไฟล์) — ต้องเลือกไฟล์ใหม่');
+    Debug.error(kind === 'local' ? `ภาพในเครื่องไม่ครบ/เสีย: ${why} — ต้องเลือกแพ็กเกจใหม่`
+      : 'อ่านไฟล์ภาพที่เลือกไว้ไม่ได้แล้ว (iPad ปล่อยไฟล์) — ต้องเลือกไฟล์ใหม่');
     viewers.xray.clear('ต้องเลือกไฟล์แพ็กเกจอีกครั้ง');
     viewers.fluoro.clear('ต้องเลือกไฟล์แพ็กเกจอีกครั้ง');
     state.imagesReady = false;
     state.byName = null;
+    if (kind === 'local') { state.source = 'files'; state.localRec = null; }
     const body = el('div', {}, [
       el('p', {}, [el('b', { text: 'งานที่ทำไว้บันทึกครบ ไม่หาย' })]),
-      el('p', { text: 'iPad ปิดการเข้าถึงไฟล์ภาพที่เลือกไว้ (มักเกิดหลังดาวน์โหลดไฟล์สำรองหรือสลับไปแอปอื่น) จึงต้องเลือกไฟล์แพ็กเกจอีกครั้ง' }),
+      el('p', { text: kind === 'local'
+        ? 'ภาพที่เก็บไว้ในเครื่องไม่ครบหรือเสีย (เบราว์เซอร์อาจลบไปเพราะพื้นที่เต็ม) จึงต้องเลือกไฟล์แพ็กเกจอีกครั้ง แล้วเว็บจะเก็บภาพให้ใหม่'
+        : 'iPad ปิดการเข้าถึงไฟล์ภาพที่เลือกไว้ (มักเกิดหลังดาวน์โหลดไฟล์สำรองหรือสลับไปแอปอื่น) จึงต้องเลือกไฟล์แพ็กเกจอีกครั้ง' }),
       el('p', { text: `กดปุ่มด้านล่าง → เข้าโฟลเดอร์แพ็กเกจเดิม → "เลือก" → "เลือกทั้งหมด" → "เปิด" แล้วจะกลับมาที่งาน ${it ? it.task_id : ''}` }),
     ]);
     const a = await dialog('ต้องเลือกไฟล์แพ็กเกจอีกครั้ง', body, [
@@ -620,9 +631,9 @@
     const ss = $('storageStatus');
     ss.innerHTML = '';
     const blocked = !st.ok;
-    for (const l of [$('filesLabel'), $('folderLabel'), $('backupLabel')]) l.classList.toggle('disabled', blocked);
-    document.querySelectorAll('#startScreen input[type=file]').forEach((i) => { i.disabled = blocked; });
+    setStartInputsDisabled(blocked || state.importing);
     if (blocked) {
+      $('localBox').hidden = true;
       ss.append(el('div', { class: 'box-err' }, [
         el('b', { text: 'เบราว์เซอร์นี้บันทึกงานลงเครื่องไม่ได้ — ห้ามเริ่มงาน' }), el('br'),
         `สาเหตุ: ${st.reason}`, el('br'),
@@ -653,18 +664,243 @@
       ]));
     }
     $('noDataBox').hidden = recs.length > 0;
+    await renderLocalBox(recs);
+  }
+
+  // กล่องภาพในเครื่อง: ครบ -> ปุ่ม ทำงานต่อ · ไม่ครบ/หาย -> ข้อความให้เลือกแพ็กเกจใหม่ · ทุกกรณีที่มีภาพ -> ปุ่ม ลบภาพ
+  async function renderLocalBox(markRecs) {
+    const box = $('localBox');
+    box.innerHTML = '';
+    box.hidden = true;
+    $('openPkgTitle').textContent = 'เปิดแพ็กเกจภาพ';
+    if (!localImagesOn()) return;
+    let pkgs = [];
+    try { pkgs = await ImageStore.listRecords(); } catch (e) { Debug.error(`อ่านที่เก็บภาพไม่ได้: ${e && (e.message || e)}`); }
+    const flag = ImageStore.flag();
+    if (!pkgs.length) {
+      if (flag) {          // เคยเก็บครบ แต่ตอนนี้ไม่มี -> ภาพถูกลบโดยเบราว์เซอร์/ระบบ
+        box.className = 'box-err';
+        box.append(el('b', { text: 'ภาพในเครื่องหายไป' }), el('br'),
+          `ภาพของแพ็กเกจ ${flag} ไม่อยู่ในเครื่องแล้ว (เบราว์เซอร์อาจลบไปเพราะพื้นที่เต็ม) `,
+          'ให้กด เลือกไฟล์ทั้งหมด แล้วเลือกแพ็กเกจเดิมอีกครั้ง · จุดที่มาร์กไว้ไม่หาย');
+        box.hidden = false;
+      }
+      return;
+    }
+    for (const r of pkgs) {
+      const chk = await ImageStore.check(r.package_id);
+      const tasksN = chk.manifest ? chk.manifest.items.length : '?';
+      const mb = Math.round((r.bytes || 0) / 1e6);
+      const hasMarks = markRecs.some((m) => m.package_id === r.package_id);
+      const item = el('div', { class: chk.ok ? 'box-ok' : 'box-err', 'data-local-pkg': r.package_id });
+      if (chk.ok) {
+        item.append(el('b', { text: `ภาพในเครื่อง: ${r.package_id}` }), el('br'),
+          `ครบ ${tasksN}/${tasksN} งาน · ใช้พื้นที่ประมาณ ${mb} MB`, el('br'),
+          el('span', { class: 'small muted', text: hasMarks ? 'กด ทำงานต่อ ได้เลย ไม่ต้องเลือกไฟล์' : 'ยังไม่มีงานที่บันทึกไว้ ถ้าเคยทำไว้ ให้นำเข้าไฟล์สำรองก่อน' }));
+        const row = el('div', { class: 'row' });
+        const go = el('button', { class: 'btn btn-primary btn-big', id: 'btnResume', text: 'ทำงานต่อ' });
+        go.addEventListener('click', () => resumeLocal(r.package_id));
+        row.append(go);
+        item.append(row);
+        $('openPkgTitle').textContent = 'หรือเปิดแพ็กเกจอื่น';
+      } else {
+        item.append(el('b', { text: `ภาพในเครื่องไม่ครบ: ${r.package_id}` }), el('br'),
+          chk.missing.length ? `ขาด ${chk.missing.length} จาก ${chk.need} ไฟล์ ` : 'เก็บภาพค้างไว้ไม่เสร็จ ',
+          '· ให้กด เลือกไฟล์ทั้งหมด แล้วเลือกแพ็กเกจเดิมอีกครั้ง เว็บจะเก็บภาพที่ขาดให้ · จุดที่มาร์กไว้ไม่หาย');
+      }
+      const row2 = el('div', { class: 'row' });
+      const del = el('button', { class: 'btn btn-danger', id: 'btnDeleteImages', text: 'ลบภาพออกจากเครื่อง' });
+      del.addEventListener('click', () => deleteLocalImages(r.package_id, mb));
+      row2.append(del);
+      item.append(row2);
+      box.append(item);
+    }
+    box.className = '';
+    box.hidden = false;
+    setStartInputsDisabled(!state.storage.ok || state.importing);
+  }
+
+  // ลบเฉพาะภาพ (ไม่ลบจุด) · เตือนให้สำรองก่อน · ยืนยัน 2 ครั้ง
+  async function deleteLocalImages(pkg, mb) {
+    if (state.importing) return;
+    let markRec = null;
+    try { markRec = await Store.get(pkg); } catch (e) { Debug.error(e); }
+    const done = markRec ? Exporter.countFinal(markRec.tasks) : 0;
+    const lastBackup = markRec && markRec.last_backup_at;
+    for (;;) {
+      const body = el('div', {}, [
+        el('p', { text: `จะลบภาพของแพ็กเกจ ${pkg} (ประมาณ ${mb} MB) ออกจากเครื่องนี้` }),
+        el('p', {}, [el('b', { text: 'จุดที่มาร์กไว้จะไม่ถูกลบ' }), ` (ทำแล้ว ${done} งาน)`]),
+        el('p', {}, ['ควรส่งออกไฟล์สำรองก่อน · สำรองล่าสุด: ',
+          lastBackup ? el('span', { text: timeTH(lastBackup) }) : el('span', { class: 'err-text', text: 'ยังไม่เคยสำรอง' })]),
+      ]);
+      const btns = [];
+      if (markRec) btns.push({ label: 'ส่งออกไฟล์สำรองก่อน', value: 'export', primary: true, id: 'btnDelExportFirst' });
+      btns.push({ label: 'ลบภาพต่อ', value: 'next', primary: !markRec, id: 'btnDelNext' },
+        { label: 'ยกเลิก', value: null, id: 'btnDelCancel' });
+      const a = await dialog('ลบภาพออกจากเครื่อง?', body, btns);
+      if (!a) return;
+      if (a === 'export') {
+        if (!state.manifest || state.manifest.package_id !== pkg) {
+          if (!(await resumeLocal(pkg, { show: false }))) return;
+        }
+        await openExport({ forced: false });
+        try { markRec = await Store.get(pkg); } catch (_) { /* ignore */ }
+        continue;
+      }
+      break;
+    }
+    const a2 = await dialog('ยืนยันอีกครั้ง', el('div', {}, [
+      el('p', {}, [el('b', { text: `ลบภาพทั้งหมดของ ${pkg} ออกจากเครื่องนี้` })]),
+      el('p', { text: 'หลังลบ ถ้าจะทำงานต่อต้องเลือกไฟล์แพ็กเกจใหม่ · จุดที่มาร์กไว้ยังอยู่ในเครื่อง' }),
+    ]), [
+      { label: 'ยกเลิก', value: null, primary: true, id: 'btnDelCancel2' },
+      { label: 'ลบภาพ', value: 'delete', id: 'btnDelConfirm' },
+    ]);
+    if (a2 !== 'delete') return;
+    await save();
+    if (state.source === 'local') {
+      // ปิดงานที่เปิดอยู่ (ภาพกำลังจะหาย) — จุดบันทึกไว้แล้ว เปิดใหม่ได้ด้วยการเลือกแพ็กเกจ
+      releaseUrls();
+      viewers.xray.clear('ยังไม่ได้เปิดแพ็กเกจ');
+      viewers.fluoro.clear('ยังไม่ได้เปิดแพ็กเกจ');
+      state.manifest = null; state.byName = null; state.tasks = {}; state.undo = {};
+      state.source = 'files'; state.localRec = null; state.imagesReady = false;
+      refreshMarks();
+    }
+    const released = await ImageStore.removeAll();
+    Debug.log(`ลบภาพในเครื่องแล้ว (${pkg}) · คืนพื้นที่ทันที: ${released ? 'ใช่' : 'เมื่อปิดแท็บอื่น'}`);
+    await refreshUsage();
+    $('startCloseRow').hidden = !state.manifest;
+    $('startScreen').hidden = false;
+    await renderStart();
+    toast('ลบภาพออกจากเครื่องแล้ว · จุดที่มาร์กไว้ยังอยู่', 4500);
+  }
+
+  // พื้นที่ที่เว็บใช้ (แสดงในแผงดีบัก)
+  async function refreshUsage() {
+    try {
+      if (navigator.storage && navigator.storage.estimate) {
+        const est = await navigator.storage.estimate();
+        state.storage.usageMB = Math.round((est.usage || 0) / 1e6);
+        state.storage.quotaMB = Math.round((est.quota || 0) / 1e6);
+      }
+      if (navigator.storage && navigator.storage.persisted) state.storage.persisted = await navigator.storage.persisted();
+    } catch (_) { /* ignore */ }
   }
 
   // ---------- เปิดแพ็กเกจ ----------
   async function handleFiles(fileList) {
     await storageReady;
     if (!state.storage.ok) { toast('บันทึกลงเครื่องไม่ได้ — ห้ามเริ่มงาน'); return; }
+    if (state.importing) return;
     const status = $('loadStatus');
     status.className = 'status';
     status.textContent = `กำลังตรวจไฟล์ ${fileList.length} ไฟล์...`;
     try {
-      const { manifest, byName, extra } = await Loader.openPackage(fileList);
+      const { manifest, manifestText, byName, extra } = await Loader.openPackage(fileList);
       if (state.manifest) await save();
+      state.source = 'files';
+      state.localRec = null;
+      if (localImagesOn()) {
+        status.textContent = '';
+        const rec = await storeImagesLocally(manifest, manifestText, byName);
+        if (rec) { state.source = 'local'; state.localRec = rec; byName.clear(); }
+      }
+      await startPackage(manifest, state.source === 'local' ? null : byName, extra.length);
+    } catch (err) {
+      status.className = 'status err';
+      status.textContent = err.message;
+      showError(err);
+    }
+  }
+
+  // คัดลอกภาพเข้าเครื่องพร้อมแถบความคืบหน้า · ไม่สำเร็จ = ใช้ไฟล์ที่เลือกต่อไปตามเดิม (คืน null)
+  async function storeImagesLocally(manifest, manifestText, byName) {
+    const box = $('importBox'), bar = $('importBar'), txt = $('importText');
+    state.importing = true;
+    box.hidden = false;
+    setStartInputsDisabled(true);
+    let lock = null;
+    try { if (navigator.wakeLock) lock = await navigator.wakeLock.request('screen'); } catch (_) { /* ไม่รองรับ */ }
+    const t0 = Date.now();
+    try {
+      const rec = await ImageStore.save(manifest, manifestText, byName, ({ done, total, bytes }) => {
+        bar.max = total; bar.value = done;
+        txt.textContent = `${done}/${total} ไฟล์ · ${Math.round(bytes / 1e6)} MB`;
+      });
+      Debug.log(`เก็บภาพในเครื่องครบ ${rec.total_files} ไฟล์ ${Math.round(rec.bytes / 1e6)} MB ใน ${Math.round((Date.now() - t0) / 1000)} วินาที`);
+      Store.persist().then((p) => { state.storage.persisted = p; });
+      refreshUsage();
+      toast('เก็บภาพไว้ในเครื่องแล้ว ครั้งต่อไปกด "ทำงานต่อ" ได้เลย ไม่ต้องเลือกไฟล์', 4500);
+      return rec;
+    } catch (e) {
+      const msg = (e && (e.message || e.name)) || String(e);
+      Debug.error(`เก็บภาพในเครื่องไม่สำเร็จ: ${msg}`);
+      const full = e && e.name === 'QuotaExceededError';
+      toast(full ? 'พื้นที่ในเครื่องไม่พอเก็บภาพ — ทำงานต่อได้ แต่ครั้งหน้าต้องเลือกไฟล์อีกครั้ง'
+        : 'เก็บภาพในเครื่องไม่ครบ — ทำงานต่อได้ แต่ครั้งหน้าต้องเลือกไฟล์อีกครั้ง (เลือกใหม่แล้วจะเก็บต่อจากเดิม)', 6000);
+      return null;
+    } finally {
+      try { if (lock) await lock.release(); } catch (_) { /* ignore */ }
+      state.importing = false;
+      box.hidden = true;
+      setStartInputsDisabled(!state.storage.ok);
+    }
+  }
+
+  function setStartInputsDisabled(off) {
+    for (const l of [$('filesLabel'), $('folderLabel'), $('backupLabel')]) l.classList.toggle('disabled', off);
+    document.querySelectorAll('#startScreen input[type=file]').forEach((i) => { i.disabled = off; });
+    document.querySelectorAll('#localBox button').forEach((b) => { b.disabled = off; });
+  }
+
+  // ทำงานต่อจากภาพที่เก็บไว้ในเครื่อง (ไม่ต้องเลือกไฟล์) — ตรวจความครบก่อนเปิดทุกครั้ง
+  async function resumeLocal(pkg, { show = true } = {}) {
+    await storageReady;
+    if (state.importing) return false;
+    const status = $('loadStatus');
+    status.className = 'status';
+    status.textContent = 'กำลังตรวจภาพในเครื่อง...';
+    try {
+      const chk = await ImageStore.check(pkg);
+      if (!chk.ok) {
+        status.textContent = '';
+        await renderStart();
+        await dialog('ภาพในเครื่องไม่ครบ', localMissingBody(chk), [
+          { label: 'เลือกไฟล์แพ็กเกจอีกครั้ง', value: 'pick', primary: true, id: 'btnLocalRepick', onClick: () => $('inputFiles').click() },
+          { label: 'ปิด', value: null, id: 'btnLocalMissingClose' }]);
+        return false;
+      }
+      const manifest = Loader.parseStoredManifest(chk.rec.manifest_text);
+      if (state.manifest) await save();
+      state.source = 'local';
+      state.localRec = chk.rec;
+      state.byName = null;
+      await startPackage(manifest, null, 0, show);
+      return true;
+    } catch (err) {
+      status.className = 'status err';
+      status.textContent = err.message;
+      showError(err);
+      return false;
+    }
+  }
+
+  function localMissingBody(chk) {
+    const n = chk.missing.length;
+    return el('div', {}, [
+      el('p', {}, [el('b', { text: 'จุดที่มาร์กไว้ไม่หาย' })]),
+      el('p', { text: chk.rec
+        ? `ภาพที่เก็บไว้ในเครื่องไม่ครบ${n ? ` (ขาด ${n} ไฟล์)` : ' (เก็บค้างไว้ไม่เสร็จ)'} ให้เลือกไฟล์แพ็กเกจเดิมอีกครั้ง แล้วเว็บจะเก็บภาพที่ขาดให้`
+        : 'ไม่พบภาพในเครื่อง (เบราว์เซอร์อาจลบไปเพราะพื้นที่เต็ม) ให้เลือกไฟล์แพ็กเกจเดิมอีกครั้ง' }),
+    ]);
+  }
+
+  // เปิดแพ็กเกจ (ภาพจากไฟล์ที่เลือก หรือจากในเครื่อง) + โหลดงานที่บันทึกไว้
+  async function startPackage(manifest, byName, extraCount, show = true) {
+    const status = $('loadStatus');
+    {                    // (บล็อกเดิมของ handleFiles)
       let rec = null;
       try { rec = await Store.get(manifest.package_id); } catch (e) { Debug.error(e); }
       const ids = new Set(manifest.items.map((it) => it.task_id));
@@ -684,16 +920,20 @@
         saved_at: rec ? rec.saved_at : null,
       };
       const idx = rec ? Math.max(0, Math.min(manifest.items.length - 1, rec.current_index || 0)) : 0;
-      Debug.log(`เปิดแพ็กเกจ ${manifest.package_id}: ${manifest.items.length} งาน, ไฟล์เกิน ${extra.length}, งานที่บันทึกไว้ ${Object.keys(tasks).length}`);
+      Debug.log(`เปิดแพ็กเกจ ${manifest.package_id}: ${manifest.items.length} งาน, ภาพจาก${state.source === 'local' ? 'ในเครื่อง' : 'ไฟล์ที่เลือก'}, ไฟล์เกิน ${extraCount}, งานที่บันทึกไว้ ${Object.keys(tasks).length}`);
       Store.persist().then((p) => { state.storage.persisted = p; });
-      $('startScreen').hidden = true;
       status.textContent = '';
+      if (!show) {         // เปิดเพื่อส่งออกเท่านั้น (ไม่โหลดภาพ ไม่สร้างงานใหม่)
+        state.index = idx;
+        state.imagesReady = false;
+        viewers.xray.clear('กด ทำงานต่อ เพื่อเปิดภาพ');
+        viewers.fluoro.clear('กด ทำงานต่อ เพื่อเปิดภาพ');
+        updateTopbar();
+        return;
+      }
+      $('startScreen').hidden = true;
       if (rec) toast(`ทำต่อจากที่บันทึกไว้ (เสร็จ ${completedCount()}/${manifest.items.length})`);
       await showTask(idx);
-    } catch (err) {
-      status.className = 'status err';
-      status.textContent = err.message;
-      showError(err);
     }
   }
 
@@ -719,6 +959,24 @@
   if (!isIOS) $('ipadHint').hidden = true;
 
   // ---------- แสดงงาน ----------
+  class LocalImageError extends Error {}
+
+  // ไฟล์ภาพของงาน: จากที่เก็บในเครื่อง (ตรวจขนาด + SHA-256) หรือจากไฟล์ที่เลือก
+  async function imageFile(name) {
+    if (state.source !== 'local') return state.byName.get(name);
+    let f = null;
+    try {
+      f = await ImageStore.getFile(state.manifest.package_id, name, state.localRec, CFG.localImages.verifyHash);
+    } catch (e) {
+      Debug.error(`อ่านภาพในเครื่องไม่ได้: ${name} ${e && (e.message || e.name)}`);
+    }
+    if (!f) {
+      try { await ImageStore.removeFile(state.manifest.package_id, name); } catch (_) { /* ignore */ }
+      throw new LocalImageError(`ภาพ ${name} ไม่อยู่ในเครื่อง หรือไม่ตรงกับตอนเก็บ`);
+    }
+    return f;
+  }
+
   function releaseUrls() {
     for (const u of state.urls) URL.revokeObjectURL(u);
     state.urls = [];
@@ -742,9 +1000,11 @@
     refreshMarks();
     releaseUrls();
     try {
+      const [xf, ff] = await Promise.all([imageFile(item.xray), imageFile(item.fluoro)]);
+      if (token !== state.loadToken) return;
       const [x, f] = await Promise.all([
-        Loader.loadImage(state.byName.get(item.xray), item.xray_size, `${item.task_id} เอกซเรย์`),
-        Loader.loadImage(state.byName.get(item.fluoro), item.fluoro_size, `${item.task_id} ฟลู`),
+        Loader.loadImage(xf, item.xray_size, `${item.task_id} เอกซเรย์`),
+        Loader.loadImage(ff, item.fluoro_size, `${item.task_id} ฟลู`),
       ]);
       if (token !== state.loadToken) { URL.revokeObjectURL(x.url); URL.revokeObjectURL(f.url); return; }
       state.urls.push(x.url, f.url);
@@ -757,6 +1017,7 @@
       if (x.hasExif || f.hasExif) Debug.log(`${item.task_id}: มี EXIF แต่ Orientation = 1 (ไม่หมุน)`);
     } catch (err) {
       if (token !== state.loadToken) return;
+      if (err instanceof LocalImageError) { await filesLost('local', err.message); return; }
       if (err instanceof Loader.FileAccessError) { await filesLost(); return; }
       viewers.xray.clear('หยุด: ดูข้อความแจ้งเตือน');
       viewers.fluoro.clear('หยุด: ดูข้อความแจ้งเตือน');
@@ -1072,7 +1333,9 @@
   // ---------- แผงดีบัก ----------
   function deviceInfo() {
     const lines = [
-      `app ${CFG.APP_VERSION} · storage ${state.storage.ok ? 'ok' : 'BLOCKED'} persisted=${state.storage.persisted} quota=${state.storage.quotaMB}MB`,
+      `app ${CFG.APP_VERSION} · storage ${state.storage.ok ? 'ok' : 'BLOCKED'} · เก็บถาวร (persist)=${state.storage.persisted}`,
+      `พื้นที่ที่เว็บใช้ ${state.storage.usageMB != null ? state.storage.usageMB : '?'} MB จากโควตา ${state.storage.quotaMB != null ? state.storage.quotaMB : '?'} MB`,
+      `ภาพจาก: ${state.source === 'local' ? `ในเครื่อง (${state.localRec ? Math.round(state.localRec.bytes / 1e6) : '?'} MB, ${state.localRec ? state.localRec.total_files : '?'} ไฟล์)` : 'ไฟล์ที่เลือก'}${localImagesOn() ? '' : ' · ปิดการเก็บภาพในเครื่อง'}`,
       `viewport ${window.innerWidth}×${window.innerHeight} CSS px · dpr ${window.devicePixelRatio}`,
       `pointer types: ${[...pointerTypesSeen].join(', ') || '-'} · นิ้ววางจุด: ${state.fingerMode ? 'เปิด' : 'ปิด'}`,
       `UA: ${navigator.userAgent}`,
@@ -1092,7 +1355,12 @@
     const p = $('debugPanel');
     p.hidden = !p.hidden;
     clearInterval(debugTimer);
-    if (!p.hidden) { Debug.render(); $('debugInfo').textContent = deviceInfo(); debugTimer = setInterval(() => { $('debugInfo').textContent = deviceInfo(); }, 500); }
+    if (!p.hidden) {
+      Debug.render();
+      $('debugInfo').textContent = deviceInfo();
+      refreshUsage().then(() => { $('debugInfo').textContent = deviceInfo(); });
+      debugTimer = setInterval(() => { $('debugInfo').textContent = deviceInfo(); }, 500);
+    }
   });
   $('btnDebugClose').addEventListener('click', () => { $('debugPanel').hidden = true; clearInterval(debugTimer); });
   $('btnDebugClear').addEventListener('click', () => Debug.clear());
@@ -1105,17 +1373,19 @@
     try {
       state.storage = await Store.check();
       if (state.storage.ok) state.storage.persisted = await Store.persist();
+      await refreshUsage();
     } catch (e) {
       state.storage = { ok: false, reason: String(e && (e.message || e)) };
     }
-    Debug.log(`เริ่มแอป v${CFG.APP_VERSION} · storage ${state.storage.ok ? 'ok' : 'BLOCKED: ' + state.storage.reason}`);
+    Debug.log(`เริ่มแอป v${CFG.APP_VERSION} · storage ${state.storage.ok ? 'ok' : 'BLOCKED: ' + state.storage.reason}` +
+      ` · เก็บถาวร=${state.storage.persisted} · ใช้พื้นที่ ${state.storage.usageMB} MB`);
     await renderStart();
     document.body.dataset.ready = '1';
   })();
 
   // ให้สคริปต์ทดสอบอัตโนมัติเข้าถึงได้
   window.__marker = {
-    state, viewers, showTask, Debug, setFingerMode, undo, deleteSelected, goNext, save, editNote,
+    state, viewers, showTask, Debug, setFingerMode, undo, deleteSelected, goNext, save, editNote, resumeLocal, refreshUsage,
     flushSave: () => saveChain,
     marks: () => { const t = task(); return t && { xray: t.xray, fluoro: t.fluoro, undo: (state.undo[currentItem().task_id] || []).length, status: t.status }; },
     task: () => task(),

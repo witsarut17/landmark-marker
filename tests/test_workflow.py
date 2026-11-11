@@ -495,7 +495,7 @@ def test_ios_resilience(env: Env):
     res = env.res
     m = manifest()
     t = targets()
-    c = env.ctx()
+    c = env.ctx(init=NO_LOCAL_IMAGES)        # ทดสอบโหมดอ่านจากไฟล์ที่เลือก (กรณีเก็บภาพในเครื่องไม่ได้)
     p = env.page(c)
     open_pkg(p)
     show_whole(p)
@@ -551,6 +551,175 @@ def test_ios_resilience(env: Env):
     p.evaluate("() => window.dispatchEvent(new ErrorEvent('error', { message: 'Script error.' }))")
     last = p.evaluate("() => window.__marker.Debug.entries().slice(-1)[0]")
     res.check(not last["isErr"] and "นอกเว็บ" in last["msg"], "I 'Script error.' จากนอกเว็บ ไม่นับเป็นข้อผิดพลาด", last["msg"])
+    c.close()
+
+
+NO_LOCAL_IMAGES = "window.__PELNAV_NO_LOCAL_IMAGES = true;"
+
+# แก้ฐานข้อมูลภาพในเครื่องโดยตรง (จำลองภาพหาย/เสีย)
+IMG_DB_OP = """async ([op, pkg, name]) => {
+  const db = await new Promise((ok, bad) => { const r = indexedDB.open('pelnav-images'); r.onsuccess = () => ok(r.result); r.onerror = bad; });
+  await new Promise((ok, bad) => {
+    const t = db.transaction('files', 'readwrite'), s = t.objectStore('files'), key = pkg + '/' + name;
+    if (op === 'delete') s.delete(key);
+    else s.get(key).onsuccess = (e) => { const v = e.target.result; v.blob = new Blob([new Uint8Array(v.size)], { type: v.blob.type }); s.put(v); };
+    t.oncomplete = ok; t.onerror = bad;
+  });
+  db.close();
+}"""
+DROP_IMG_DB = """() => new Promise((ok) => { window.ImageStore._close().then(() => {
+  const r = indexedDB.deleteDatabase('pelnav-images'); r.onsuccess = ok; r.onerror = ok; r.onblocked = ok; }); })"""
+# จำนวนภาพและแพ็กเกจที่เหลือในฐานข้อมูลภาพ (หลังลบ หน้าแรกอาจเปิดฐานข้อมูลเปล่าขึ้นใหม่ได้ ไม่มีภาพ)
+IMG_DB_COUNT = """() => new Promise((ok) => { const r = indexedDB.open('pelnav-images');
+  r.onupgradeneeded = () => { r.transaction.abort(); };
+  r.onerror = () => ok(0);
+  r.onsuccess = () => { const db = r.result; if (!db.objectStoreNames.contains('files')) { db.close(); ok(0); return; }
+    const t = db.transaction(['files', 'packages']); let n = 0;
+    t.objectStore('files').count().onsuccess = (e) => { n += e.target.result; };
+    t.objectStore('packages').count().onsuccess = (e) => { n += e.target.result; };
+    t.oncomplete = () => { db.close(); ok(n); }; }; })"""
+USAGE = "() => navigator.storage.estimate().then(e => e.usage)"
+
+
+def local_state(p, pkg):
+    return p.evaluate("""async (pkg) => { const r = await window.ImageStore.getRecord(pkg);
+        const n = (await window.ImageStore.storedNames(pkg)).length;
+        return { complete: !!(r && r.complete), stored: n, flag: window.ImageStore.flag(), source: window.__marker.state.source }; }""", pkg)
+
+
+def test_local_images(env: Env):
+    """แบบ A: เปิดแพ็กเกจครั้งแรกเก็บภาพในเครื่อง → ครั้งต่อไปกด ทำงานต่อ ไม่ต้องเลือกไฟล์
+    ตรวจความครบทุกครั้งที่เปิด, ภาพหาย/เสีย → ให้เลือกแพ็กเกจใหม่ จุดไม่หาย, ลบภาพ (ยืนยัน 2 ครั้ง) ไม่ลบจุด"""
+    res = env.res
+    m = manifest()
+    pkg = m["package_id"]
+    nfiles = 2 * len(m["items"])
+    t = targets()
+    c = env.ctx()
+    p = env.page(c)
+    u0 = p.evaluate(USAGE)
+
+    # 1) เปิดครั้งแรก: คัดลอกภาพเข้าเครื่อง พร้อมแถบความคืบหน้า
+    open_pkg(p)
+    p.wait_for_function("() => window.__marker.state.source === 'local'", timeout=15000)
+    ls = local_state(p, pkg)
+    bar = p.evaluate("() => { const b = document.getElementById('importBar'); return [b.value, b.max]; }")
+    res.check(ls["complete"] and ls["stored"] == nfiles and ls["flag"] == pkg and bar == [nfiles, nfiles],
+              "L เปิดครั้งแรก: เก็บภาพในเครื่องครบทุกไฟล์ + แถบความคืบหน้าถึง 100%", f"{ls} bar={bar}")
+    show_whole(p)
+    inp = Input(p, c, "mouse")
+    place_pairs(p, inp, [(t["T001_X.png"][0], t["T001_F.jpg"][0])])
+    flush(p)
+    u1 = p.evaluate(USAGE)
+
+    # 2) ปิดแล้วเปิดใหม่ (= แตะไอคอน): กด ทำงานต่อ ได้เลย ไม่ต้องเลือกไฟล์
+    p.close()
+    p = env.page(c)
+    p.wait_for_selector("#btnResume", timeout=5000)
+    box = p.text_content("#localBox") or ""
+    p.click("#btnResume")
+    p.wait_for_function("() => window.__marker.state.imagesReady && window.__marker.state.source === 'local'", timeout=15000)
+    kept = p.evaluate("() => window.__marker.state.tasks['T001'].xray.filter(Boolean).length")
+    res.check(f"ครบ {len(m['items'])}/{len(m['items'])} งาน" in box and kept == 1 and p.is_hidden("#startScreen"),
+              "L เปิดใหม่: กด ทำงานต่อ แล้วเปิดงานได้เลย ไม่ต้องเลือกไฟล์ จุดอยู่ครบ", box.replace("\n", " ")[:120])
+    goto_task(p, 2)
+    p.wait_for_function("() => window.__marker.state.imagesReady")
+    res.check(p.evaluate("() => window.__marker.viewers.xray.W") == m["items"][2]["xray_size"][0],
+              "L งานอื่นโหลดภาพจากในเครื่องได้ (ขนาดตรง manifest)", "")
+
+    # 3) แผงดีบัก: สิทธิ์เก็บถาวร + พื้นที่ที่ใช้
+    p.click("#btnDebug")
+    p.wait_for_function("() => /พื้นที่ที่เว็บใช้ \\d+ MB/.test(document.getElementById('debugInfo').textContent)")
+    dbg = p.text_content("#debugInfo") or ""
+    p.click("#btnDebugClose")
+    res.check("เก็บถาวร (persist)=" in dbg and "ภาพจาก: ในเครื่อง" in dbg, "L แผงดีบัก: แสดงสิทธิ์เก็บถาวร พื้นที่ที่ใช้ และที่มาของภาพ",
+              dbg.split("\n")[0][:80])
+
+    # 4) ภาพในเครื่องเสีย (เนื้อไฟล์ไม่ตรง SHA-256) -> ข้อความชัด + เลือกแพ็กเกจใหม่ -> เก็บไฟล์นั้นใหม่ จุดไม่หาย
+    p.evaluate(IMG_DB_OP, ["corrupt", pkg, m["items"][1]["xray"]])
+    p.evaluate("() => { window.__marker.showTask(1); }")
+    title = wait_dialog(p)
+    body = p.text_content("#dialogBody") or ""
+    repick(p)
+    p.wait_for_function("() => window.__marker.state.imagesReady && window.__marker.state.source === 'local'", timeout=15000)
+    ls = local_state(p, pkg)
+    kept = p.evaluate("() => window.__marker.state.tasks['T001'].xray.filter(Boolean).length")
+    res.check("เลือกไฟล์แพ็กเกจอีกครั้ง" in title and "ไม่ครบหรือเสีย" in body and "ไม่หาย" in body and ls["complete"] and kept == 1,
+              "L ภาพในเครื่องเสีย → บอกให้เลือกแพ็กเกจใหม่ → เก็บใหม่ครบ จุดไม่หาย", f"{title} · {ls}")
+
+    # 5) ภาพหายบางไฟล์ -> หน้าแรกบอกว่าไม่ครบ ไม่มีปุ่ม ทำงานต่อ -> เลือกแพ็กเกจเดิม เก็บเฉพาะที่ขาด
+    p.evaluate(IMG_DB_OP, ["delete", pkg, m["items"][3]["fluoro"]])
+    p.reload()
+    p.wait_for_selector("body[data-ready='1']")
+    p.wait_for_selector("#localBox:not([hidden])")
+    box = p.text_content("#localBox") or ""
+    no_resume = not p.is_visible("#btnResume")
+    p.evaluate("() => { window.__puts = 0; const o = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (v) { if (v && v.blob) window.__puts++; return o.apply(this, arguments); }; }")
+    open_pkg(p)
+    p.wait_for_function("() => window.__marker.state.source === 'local'", timeout=15000)
+    puts = p.evaluate("() => window.__puts")
+    res.check("ไม่ครบ" in box and f"ขาด 1 จาก {nfiles}" in box and no_resume and puts == 1 and local_state(p, pkg)["complete"],
+              "L ภาพหายบางไฟล์ → หน้าแรกบอกชัด → เลือกแพ็กเกจเดิม เก็บเฉพาะไฟล์ที่ขาด", f"{box[:80]} puts={puts}")
+
+    # 6) ภาพหายทั้งหมด (จำลองเบราว์เซอร์ลบ) แต่จุดยังอยู่ -> หน้าแรกบอก "ภาพในเครื่องหายไป"
+    p.evaluate(DROP_IMG_DB)
+    p.reload()
+    p.wait_for_selector("body[data-ready='1']")
+    box = p.text_content("#localBox") or ""
+    saved = p.text_content("#savedList") or ""
+    res.check("หายไป" in box and "จุดที่มาร์กไว้ไม่หาย" in box and pkg in saved and p.is_visible("#localBox"),
+              "L ภาพหายทั้งหมด → หน้าแรกบอกให้เลือกแพ็กเกจใหม่ งานที่ทำไว้ยังอยู่", box[:80])
+    open_pkg(p)
+    p.wait_for_function("() => window.__marker.state.source === 'local'", timeout=15000)
+
+    # 7) ลบภาพออกจากเครื่อง: เตือนสำรอง + ยืนยัน 2 ครั้ง · ลบเฉพาะภาพ จุดยังอยู่ · พื้นที่คืน
+    flush(p)
+    marks_before = idb_record(p, pkg)["tasks"]
+    p.click("#btnOpen")
+    p.wait_for_selector("#btnDeleteImages")
+    p.click("#btnDeleteImages")
+    t1 = wait_dialog(p)
+    b1 = p.text_content("#dialogBody") or ""
+    p.click("#btnDelCancel")
+    still = local_state(p, pkg)["complete"]
+    p.click("#btnDeleteImages")
+    wait_dialog(p)
+    p.click("#btnDelExportFirst")
+    t_exp = wait_dialog(p)
+    jname, _ = download(p, "#btnDlJson", "before_delete")
+    p.click("#btnExportClose")
+    wait_dialog(p)
+    p.click("#btnDelNext")
+    t2 = wait_dialog(p)
+    p.click("#btnDelConfirm")
+    p.wait_for_function("() => !window.ImageStore.flag() && document.getElementById('localBox').hidden", timeout=10000)
+    left = p.evaluate(IMG_DB_COUNT)
+    gone = left == 0
+    marks_after = idb_record(p, pkg)["tasks"]
+    u2 = p.evaluate(USAGE)
+    res.check(t1.startswith("ลบภาพออกจากเครื่อง") and "จุดที่มาร์กไว้จะไม่ถูกลบ" in b1 and "สำรองล่าสุด" in b1 and still
+              and "ส่งออก" in t_exp and jname.endswith(".json") and t2 == "ยืนยันอีกครั้ง",
+              "L ปุ่มลบภาพ: เตือนให้สำรองก่อน (ส่งออกได้จากหน้าต่าง) + ยืนยัน 2 ครั้ง · ยกเลิกแล้วไม่ลบ", f"{t1} / {t2}")
+    res.check(gone and tasks_equal(marks_after, marks_before),
+              "L ลบภาพแล้ว: ไม่เหลือภาพในเครื่อง จุดที่มาร์กไว้ตรงเดิมทุกค่า", f"เหลือ {left} รายการ")
+    res.check(u1 > u0 and u2 < u1, "L ลบภาพแล้ว พื้นที่ที่เว็บใช้ลดลง", f"ก่อนเก็บ {u0} · หลังเก็บ {u1} · หลังลบ {u2} ไบต์")
+    p.close()
+    p = env.page(c)
+    saved = p.text_content("#savedList") or ""
+    res.check(pkg in saved and "ทำแล้ว" in saved and not p.is_visible("#btnResume") and p.is_hidden("#localBox"),
+              "L เปิดเว็บหลังลบภาพ: งานที่ทำไว้ยังแสดง ไม่มีปุ่ม ทำงานต่อ (ต้องเลือกแพ็กเกจ)", saved.replace("\n", " ")[:100])
+    check_page_errors(p, res, "หน้าทดสอบภาพในเครื่อง")
+    c.close()
+
+    # 8) เก็บภาพไม่ได้ (พื้นที่เต็ม) -> ยังทำงานได้ด้วยไฟล์ที่เลือก + แจ้งเตือน
+    c = env.ctx()
+    p = env.page(c)
+    p.evaluate("() => { window.ImageStore.save = () => Promise.reject(new DOMException('full', 'QuotaExceededError')); }")
+    open_pkg(p)
+    p.wait_for_function("() => window.__marker.state.imagesReady")
+    msg = p.text_content("#toast") or ""
+    res.check(p.evaluate("() => window.__marker.state.source") == "files" and "พื้นที่ในเครื่องไม่พอ" in msg,
+              "L พื้นที่ไม่พอเก็บภาพ → แจ้งเตือน แล้วทำงานต่อด้วยไฟล์ที่เลือกได้", msg)
     c.close()
 
 
@@ -685,7 +854,7 @@ def main():
         browser = pw.chromium.launch(channel=args.channel, headless=not args.headed)
         env = Env(browser, base, res)
         for fn in (test_box_and_realistic, test_navigation_quality, test_data_safety, test_forced_backup,
-                   test_ios_resilience, test_ios_share, test_mac_trackpad, test_private_mode):
+                   test_ios_resilience, test_local_images, test_ios_share, test_mac_trackpad, test_private_mode):
             if args.only and not any(k in fn.__name__ for k in args.only.split(",")):
                 continue
             print(f"> {fn.__name__}", flush=True)

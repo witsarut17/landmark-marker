@@ -87,7 +87,7 @@
 <div id="startScreen" class="overlay">
   <div class="card">
     <h1>PelNavPlan · มาร์กจุดอ้างอิง</h1>
-    <p class="small muted">ภาพเปิดในเครื่องนี้เท่านั้น ไม่ถูกส่งไปที่ใด · งานบันทึกในเครื่องอัตโนมัติ</p>
+    <p class="small muted">ภาพเปิดและเก็บไว้ในเครื่องนี้เท่านั้น ไม่ถูกส่งไปที่ใด · งานบันทึกในเครื่องอัตโนมัติ</p>
     <div id="storageStatus" class="status"></div>
     <div id="savedList"></div>
     <div id="noDataBox" class="box-warn" hidden>
@@ -98,7 +98,14 @@
           <input type="file" class="inputBackup" accept=".json,application/json" hidden></label>
       </div>
     </div>
-    <h2 class="small-h">เปิดแพ็กเกจภาพ</h2>
+    <!-- ภาพที่เก็บไว้ในเครื่อง: ทำงานต่อได้โดยไม่ต้องเลือกไฟล์ / ลบภาพเมื่อทำเสร็จ -->
+    <div id="localBox" hidden></div>
+    <div id="importBox" hidden>
+      <div class="small"><b>กำลังเก็บภาพไว้ในเครื่อง</b> — อย่าปิดเว็บหรือสลับแอปจนกว่าจะเสร็จ</div>
+      <progress id="importBar" max="1" value="0"></progress>
+      <div id="importText" class="small muted"></div>
+    </div>
+    <h2 class="small-h" id="openPkgTitle">เปิดแพ็กเกจภาพ</h2>
     <p class="small">เลือก <b>ทุกไฟล์</b> ในโฟลเดอร์แพ็กเกจ (รวม <code>manifest.json</code>)</p>
     <div class="row">
       <label class="btn btn-primary btn-big file-btn" id="filesLabel">
@@ -156,6 +163,7 @@
 <script src="viewer.js"></script>
 <script src="loader.js"></script>
 <script src="store.js"></script>
+<script src="imagestore.js"></script>
 <script src="exporter.js"></script>
 <script src="app.js"></script>
 </body>
