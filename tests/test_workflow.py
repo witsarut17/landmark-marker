@@ -210,7 +210,7 @@ def test_navigation_quality(env: Env):
     t1 = p.evaluate("() => window.__marker.state.tasks['T002']")
     res.check("พิมพ์เหตุผล" in err2 and t1["status"] == "unmarkable" and t1["reason"] == "other" and "เบลอ" in t1["reason_text"],
               "N มาร์กไม่ได้ + อื่นๆ ต้องพิมพ์เหตุผล", f"{err2} · {t1['status']} {t1['reason_text']}")
-    res.check("เสร็จ 2/" in (p.text_content("#progress") or ""), "N ความคืบหน้าบนแถบบน", p.text_content("#progress") or "")
+    res.check("ทำแล้ว 2/" in (p.text_content("#progress") or ""), "N ความคืบหน้าบนแถบบน", p.text_content("#progress") or "")
 
     # Q: เตือนการกระจาย (งาน T003 เอกซเรย์ 3024x4032 กรอบ ~1663x2218)
     show_whole(p)
@@ -723,6 +723,144 @@ def test_local_images(env: Env):
     c.close()
 
 
+def test_update(env: Env):
+    """ไอคอนบนหน้าจอโฮมได้เวอร์ชันใหม่เองโดยไม่ต้องลบไอคอน: เช็ก version.js → บันทึก → โหลดใหม่ → กลับเข้างานเดิม
+    ข้อมูลในเครื่องไม่หาย · ไม่วนโหลดซ้ำถ้าเซิร์ฟเวอร์ยังส่งของเก่า · ทุกไฟล์ใน index.html มี ?v= ตรงกับ version.js"""
+    res = env.res
+    root = GEN.parents[1]
+    ver = re.search(r"PELNAV_VERSION = '([^']+)'", (root / "marker" / "version.js").read_text(encoding="utf-8")).group(1)
+    html = (root / "marker" / "index.html").read_text(encoding="utf-8")
+    refs = re.findall(r'(?:src|href)="([\w.-]+\.(?:js|css))(\?v=[^"]*)?"', html)
+    bad = [f + q for f, q in refs if q != f"?v={ver}"]
+    res.check(refs and not bad, "U ทุกไฟล์ใน index.html มี ?v= ตรงกับ version.js (กันไฟล์เก่าปนไฟล์ใหม่)", str(bad))
+
+    t = targets()
+    c = env.ctx()
+    p = env.page(c)
+    res.check(p.evaluate("() => window.MARKER_CONFIG.APP_VERSION") == ver, "U เว็บอ่านเวอร์ชันจาก version.js", ver)
+    open_pkg(p)
+    p.wait_for_function("() => window.__marker.state.source === 'local'", timeout=15000)
+    show_whole(p)
+    inp = Input(p, c, "mouse")
+    place_pairs(p, inp, [(t["T001_X.png"][0], t["T001_F.jpg"][0])])
+    # เวอร์ชันเดิม -> ไม่โหลดใหม่
+    same = p.evaluate("() => window.__marker.checkUpdate('test', true)")
+    res.check(same is False and "?v=" not in p.url, "U เวอร์ชันบนเว็บเท่าเดิม → ไม่โหลดใหม่", p.url)
+
+    # จำลองว่า push เวอร์ชันใหม่แล้ว (เซิร์ฟเวอร์ตอบ version.js ใหม่) — ไฟล์อื่นยังเป็นชุดเดิม
+    p.route("**/version.js?check=*", lambda r: r.fulfill(status=200, content_type="application/javascript",
+                                                          body="window.PELNAV_VERSION = '9.9.9';"))
+    p.evaluate("() => { window.__marker.checkUpdate('test', true); }")
+    p.wait_for_url("**/index.html?v=9.9.9", timeout=10000)
+    p.wait_for_selector("body[data-ready='1']")
+    p.wait_for_function("() => window.__marker.state.imagesReady && window.__marker.state.source === 'local'", timeout=15000)
+    kept = p.evaluate("() => window.__marker.state.tasks['T001'].xray.filter(Boolean).length")
+    res.check(kept == 1 and p.is_hidden("#startScreen"),
+              "U มีเวอร์ชันใหม่ → บันทึก โหลดใหม่ แล้วกลับเข้างานเดิมเอง จุดอยู่ครบ (ไม่ต้องลบไอคอน)", p.url)
+    # เซิร์ฟเวอร์ยังส่งไฟล์ชุดเดิม (9.9.9 > เวอร์ชันที่ได้) -> ต้องไม่วนโหลดซ้ำ
+    again = p.evaluate("() => window.__marker.checkUpdate('test', true)")
+    p.wait_for_timeout(1200)
+    logged = p.evaluate("() => window.__marker.Debug.entries().some(e => e.msg.includes('ยังได้'))")
+    res.check(again is False and p.url.endswith("?v=9.9.9") and logged,
+              "U โหลดใหม่แล้วยังได้ของเก่า → ไม่วนโหลดซ้ำ (บันทึกในดีบัก)", p.url)
+    # ระหว่างมีหน้าต่างถามค้าง -> ยังไม่โหลดใหม่
+    p.evaluate("() => sessionStorage.removeItem('pelnavUpdateTried')")
+    p.click("#btnUnmarkable")
+    wait_dialog(p)
+    held = p.evaluate("() => window.__marker.checkUpdate('test', true)")
+    res.check(held is False and p.is_visible("#dialog"), "U มีหน้าต่างถามค้าง → ยังไม่โหลดใหม่ (รอจนปิดหน้าต่าง)", "")
+    p.click("#btnReasonCancel")
+    p.unroute("**/version.js?check=*")
+    check_page_errors(p, res, "หน้าทดสอบอัปเดต")
+    c.close()
+
+
+def test_skip_jump(env: Env):
+    """ข้ามไปก่อน (กันลืม) + ไปที่งาน"""
+    res = env.res
+    m = manifest()
+    n = len(m["items"])
+    c = env.ctx()
+    p = env.page(c)
+    open_pkg(p)
+    idx = lambda: p.evaluate("() => window.__marker.state.index")       # noqa: E731
+    st = lambda tid: p.evaluate("(id) => (window.__marker.state.tasks[id] || {}).status", tid)  # noqa: E731
+
+    # 1) ข้าม T001, T002 -> นับว่ายังไม่เสร็จ แถบบนแสดงจำนวนที่ข้าม
+    p.click("#btnSkip")
+    p.wait_for_function("() => window.__marker.state.index === 1 && window.__marker.state.imagesReady")
+    p.click("#btnSkip")
+    p.wait_for_function("() => window.__marker.state.index === 2 && window.__marker.state.imagesReady")
+    prog = p.text_content("#progress") or ""
+    res.check(st("T001") == "skipped" and st("T002") == "skipped" and f"ทำแล้ว 0/{n}" in prog and "ข้ามไว้ 2" in prog,
+              "K ข้ามไปก่อน: นับว่ายังไม่เสร็จ + แถบบนแสดง ทำแล้ว x/N · ข้ามไว้ y", prog)
+
+    # 2) ทำงานที่ไม่ได้ข้ามครบ -> พากลับไปงานที่ข้ามอัตโนมัติ
+    for i in range(2, n):
+        p.click("#btnUnmarkable")
+        choose_reason(p, "unclear")
+        if i < n - 1:
+            p.wait_for_function(f"() => window.__marker.state.index === {i + 1} && window.__marker.state.imagesReady")
+    p.wait_for_function("() => window.__marker.state.index === 0 && window.__marker.state.imagesReady")
+    msg = p.text_content("#toast") or ""
+    res.check(idx() == 0 and "กลับไปงานที่ข้ามไว้" in msg and p.is_hidden("#dialog"),
+              "K ทำงานที่ไม่ได้ข้ามครบ → พากลับไปงานที่ข้ามไว้งานแรกเอง (ไม่ต้องกดเลือก)", msg)
+
+    # 3) กดข้ามซ้ำบนงานที่ข้ามไว้ -> ไปงานที่ข้ามถัดไป (วน) · งานที่ข้ามแล้วมาร์กเสร็จ -> ไปงานที่ข้ามที่เหลือ
+    p.click("#btnSkip")
+    p.wait_for_function("() => window.__marker.state.index === 1 && window.__marker.state.imagesReady")
+    p.click("#btnSkip")
+    p.wait_for_function("() => window.__marker.state.index === 0 && window.__marker.state.imagesReady")
+    p.click("#btnUnmarkable")
+    choose_reason(p, "unclear")
+    p.wait_for_function("() => window.__marker.state.index === 1 && window.__marker.state.imagesReady")
+    res.check(st("T001") == "unmarkable" and st("T002") == "skipped" and "ข้ามไว้ 1" in (p.text_content("#progress") or ""),
+              "K งานที่ข้ามไว้: กดข้ามซ้ำวนไปงานที่ข้ามถัดไป · ทำเสร็จแล้วไปงานที่ข้ามที่เหลือ", p.text_content("#progress") or "")
+
+    # 4) ไฟล์สำรอง JSON/CSV บันทึกสถานะ skipped
+    p.click("#btnExport")
+    wait_dialog(p)
+    _, cpath = download(p, "#btnDlCsv", "skip")
+    p.click("#btnExportClose")
+    rows = [r for r in csv.DictReader(io.StringIO("\n".join(l for l in cpath.read_text(encoding="utf-8-sig").splitlines()
+                                                          if not l.startswith("#"))))]
+    csv_ok = any(r["task_id"] == "T002" and r["status"] == "skipped" for r in rows)
+
+    # 5) จบงานขณะยังมีงานที่ข้าม -> เตือนพร้อมจำนวน · ยกเลิกได้ · จบไปก่อนได้
+    p.click("#btnFinish")
+    t1 = wait_dialog(p)
+    p.click("#btnFinishCancel")
+    still = p.is_hidden("#dialog") and p.is_hidden("#startScreen")
+    p.click("#btnFinish")
+    wait_dialog(p)
+    p.click("#btnFinishAnyway")
+    wait_dialog(p)
+    _, jpath = download(p, "#btnDlJson", "skip")
+    p.wait_for_selector("#startScreen:not([hidden])")
+    data = json.loads(jpath.read_text(encoding="utf-8"))
+    p.wait_for_function("() => (document.getElementById('savedList').textContent || '').includes('ข้ามไว้')")
+    saved = p.text_content("#savedList") or ""
+    res.check(t1 == "ยังมีงานที่ข้ามไว้ 1 งาน" and still, "K กด จบงาน ขณะมีงานที่ข้าม → เตือนพร้อมจำนวน (ยกเลิกได้)", t1)
+    res.check(data["tasks"]["T002"]["status"] == "skipped" and csv_ok and "ข้ามไว้ 1 งาน" in saved,
+              "K ไฟล์สำรอง JSON/CSV บันทึกสถานะ skipped + หน้าแรกแสดงจำนวนที่ข้าม", saved.replace("\n", " ")[:120])
+
+    # 6) ไปที่งาน: พิมพ์เลข / T-เลข แล้วกระโดดได้ · เลขผิดแจ้งเตือน ไม่ย้าย
+    p.click("#btnStartClose")
+    p.fill("#jumpInput", "5")
+    p.press("#jumpInput", "Enter")
+    p.wait_for_function("() => window.__marker.state.index === 4 && window.__marker.state.imagesReady")
+    p.fill("#jumpInput", "T003")
+    p.click("#btnJump")
+    p.wait_for_function("() => window.__marker.state.index === 2 && window.__marker.state.imagesReady")
+    p.fill("#jumpInput", "99")
+    p.press("#jumpInput", "Enter")
+    p.wait_for_timeout(200)
+    bad = p.text_content("#toast") or ""
+    res.check(idx() == 2 and "ไม่มีงานเลข" in bad, "K ไปที่งาน: พิมพ์ 5 หรือ T003 แล้วไปได้ · เลขผิดแจ้งเตือนและไม่ย้าย", bad)
+    check_page_errors(p, res, "หน้าทดสอบข้าม/ไปที่งาน")
+    c.close()
+
+
 SHARE_STUB = """
   window.__shared = [];
   Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (iPad; CPU OS 26_4 like Mac OS X) AppleWebKit/605.1.15 Version/26.4 Mobile/15E148 Safari/604.1' });
@@ -854,7 +992,7 @@ def main():
         browser = pw.chromium.launch(channel=args.channel, headless=not args.headed)
         env = Env(browser, base, res)
         for fn in (test_box_and_realistic, test_navigation_quality, test_data_safety, test_forced_backup,
-                   test_ios_resilience, test_local_images, test_ios_share, test_mac_trackpad, test_private_mode):
+                   test_ios_resilience, test_local_images, test_skip_jump, test_update, test_ios_share, test_mac_trackpad, test_private_mode):
             if args.only and not any(k in fn.__name__ for k in args.only.split(",")):
                 continue
             print(f"> {fn.__name__}", flush=True)

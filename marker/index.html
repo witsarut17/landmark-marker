@@ -13,7 +13,7 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-180.png">
 <title>PelNavPlan Landmark Marker</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=0.8.0">
 </head>
 <body>
 
@@ -22,10 +22,15 @@
     <button id="btnOpen" class="btn" title="หน้าแรก / เปิดแพ็กเกจ / นำเข้าไฟล์สำรอง">หน้าแรก</button>
     <span id="taskLabel" class="task-label">— / —</span>
     <span id="progress" class="muted"></span>
+    <span class="jump-box">
+      <input id="jumpInput" class="jump-input" type="text" inputmode="numeric" maxlength="6" placeholder="ไปที่งาน" aria-label="ไปที่งาน (พิมพ์เลขงาน)" disabled>
+      <button id="btnJump" class="btn btn-small" disabled title="ไปที่งานตามเลขที่พิมพ์">ไป</button>
+    </span>
   </div>
   <div class="group">
     <button id="btnPrev" class="btn" disabled>◀ ก่อนหน้า</button>
     <button id="btnNext" class="btn btn-primary" disabled>ถัดไป ▶</button>
+    <button id="btnSkip" class="btn" disabled title="ข้ามงานนี้ไปก่อน — เว็บจะพากลับมาเมื่อทำงานอื่นครบ">ข้ามไปก่อน</button>
     <button id="btnUnmarkable" class="btn" disabled>มาร์กไม่ได้</button>
   </div>
   <div class="group">
@@ -159,12 +164,13 @@
   <pre id="debugLog"></pre>
 </aside>
 
-<script src="config.js"></script>
-<script src="viewer.js"></script>
-<script src="loader.js"></script>
-<script src="store.js"></script>
-<script src="imagestore.js"></script>
-<script src="exporter.js"></script>
-<script src="app.js"></script>
+<script src="version.js?v=0.8.0"></script>
+<script src="config.js?v=0.8.0"></script>
+<script src="viewer.js?v=0.8.0"></script>
+<script src="loader.js?v=0.8.0"></script>
+<script src="store.js?v=0.8.0"></script>
+<script src="imagestore.js?v=0.8.0"></script>
+<script src="exporter.js?v=0.8.0"></script>
+<script src="app.js?v=0.8.0"></script>
 </body>
 </html>

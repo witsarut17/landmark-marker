@@ -8,7 +8,8 @@
   const SIDES = ['xray', 'fluoro'];
   const SIDE_NAME = { xray: 'เอกซเรย์', fluoro: 'ฟลู' };
   const FINAL = new Set(['done', 'partial', 'unmarkable']);
-  const STATUS_NAME = { todo: 'ยังไม่ทำ', in_progress: 'กำลังทำ', done: 'เสร็จ 4 คู่', partial: 'เสร็จ 3 คู่', unmarkable: 'มาร์กไม่ได้' };
+  // skipped = หมอกด "ข้ามไปก่อน" (ยังไม่เสร็จ) — คงสถานะนี้ไว้จนกว่างานจะเสร็จ (done/partial/unmarkable)
+  const STATUS_NAME = { todo: 'ยังไม่ทำ', in_progress: 'กำลังทำ', skipped: 'ข้ามไว้', done: 'เสร็จ 4 คู่', partial: 'เสร็จ 3 คู่', unmarkable: 'มาร์กไม่ได้' };
   const REASONS = {
     unmarkable: [['unclear', 'ภาพไม่ชัด'], ['no_overlap', 'ไม่มีบริเวณร่วมกัน'], ['view_angle', 'มุมถ่ายต่างกันมาก'], ['other', 'อื่น ๆ (พิมพ์เหตุผล)']],
     partial: [['no_4th_point', 'หาจุดที่ 4 ที่เห็นชัดทั้งสองภาพไม่ได้'], ['unclear', 'ภาพไม่ชัด'], ['view_angle', 'มุมถ่ายต่างกันมาก'], ['other', 'อื่น ๆ (พิมพ์เหตุผล)']],
@@ -99,6 +100,8 @@
   const pairCount = (t) => [...Array(N).keys()].filter((i) => t.xray[i] && t.fluoro[i]).length;
   const hasOrphans = (t) => [...Array(N).keys()].some((i) => !!t.xray[i] !== !!t.fluoro[i]);
   const completedCount = () => Object.values(state.tasks).filter((t) => FINAL.has(t.status)).length;
+  const skippedCount = () => Object.values(state.tasks).filter((t) => t.status === 'skipped').length;
+  const statusAt = (i) => ((state.tasks[state.manifest.items[i].task_id] || {}).status || 'todo');
   const totalTasks = () => (state.manifest ? state.manifest.items.length : 0);
 
   function activeIndex(t) {
@@ -414,6 +417,7 @@
           : `วางจุด ${k + 1} บน${SIDE_NAME[need[0]]}ให้ตรงกับอีกภาพ`;
         for (const s of SIDES) panes[s].style.borderColor = need.includes(s) ? color : '';
         if (t.status === 'partial') $('hintText').textContent = 'งานนี้: บันทึก 3 คู่ — ' + $('hintText').textContent;
+        if (t.status === 'skipped') $('hintText').textContent = 'งานนี้: ข้ามไว้ — ' + $('hintText').textContent;
       }
       warn = SIDES.map(spreadWarning).filter(Boolean).join(' · ');
       if (warn) warn = '⚠ ' + warn + ' — ควรกระจายให้ทั่ว';
@@ -433,10 +437,17 @@
     const m = state.manifest;
     const n = totalTasks();
     $('taskLabel').textContent = m ? `${m.items[state.index].task_id} / ${n}` : '— / —';
-    $('progress').textContent = m ? `เสร็จ ${completedCount()}/${n}` : '';
+    const pr = $('progress');
+    pr.textContent = m ? `ทำแล้ว ${completedCount()}/${n}` : '';
+    const sk = m ? skippedCount() : 0;
+    if (sk) pr.append(' · ', el('span', { class: 'skip-count', text: `ข้ามไว้ ${sk}` }));
     $('btnPrev').disabled = !m || state.index <= 0;
     $('btnNext').disabled = !m;
+    const cur = m ? state.tasks[m.items[state.index].task_id] : null;
+    $('btnSkip').disabled = !m || !!(cur && FINAL.has(cur.status));
     $('btnUnmarkable').disabled = !m;
+    $('jumpInput').disabled = !m;
+    $('btnJump').disabled = !m;
     $('btnExport').disabled = !m;
     $('btnFinish').disabled = !m;
   }
@@ -562,10 +573,10 @@
   }
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') save();
-    else onReturn();
+    else { onReturn(); checkUpdate('resume'); }
   });
   window.addEventListener('pagehide', () => save());
-  window.addEventListener('pageshow', () => onReturn());
+  window.addEventListener('pageshow', (e) => { onReturn(); if (e.persisted) checkUpdate('resume'); });
   window.addEventListener('focus', () => onReturn());
 
   // กลับมาที่เว็บ (เช่น หลังดาวน์โหลดไฟล์สำรอง): บันทึกซ้ำ + ตรวจว่ายังอ่านไฟล์ภาพได้ไหม
@@ -655,9 +666,11 @@
     list.innerHTML = '';
     for (const r of recs) {
       const done = Exporter.countFinal(r.tasks);
+      const sk = Object.values(r.tasks || {}).filter((t) => t.status === 'skipped').length;
       list.append(el('div', { class: 'saved-item', 'data-pkg': r.package_id }, [
         el('b', { text: `งานในเครื่อง: ${r.package_id}` }), el('br'),
-        `ทำแล้ว ${done}/${r.total_tasks || '?'} งาน`, el('br'),
+        `ทำแล้ว ${done}/${r.total_tasks || '?'} งาน`,
+        sk ? el('span', { class: 'err-text', text: ` · ข้ามไว้ ${sk} งาน` }) : null, el('br'),
         `บันทึกล่าสุด: ${timeTH(r.saved_at)}`, el('br'),
         'สำรองล่าสุด: ',
         r.last_backup_at ? el('span', { text: timeTH(r.last_backup_at) }) : el('span', { class: 'err-text', text: 'ยังไม่เคยสำรอง' }),
@@ -1054,7 +1067,7 @@
       toast('มีจุดที่ยังไม่มีคู่ — วางคู่ให้ครบ หรือลบจุดนั้นก่อน', 3500);
       return;
     } else {
-      toast(`ยังไม่ครบ (${pc}/4 คู่) — ต้องครบ 4 คู่ หรือ 3 คู่พร้อมเหตุผล หรือกด "มาร์กไม่ได้"`, 3500);
+      toast(`ยังไม่ครบ (${pc}/4 คู่) — ต้องครบ 4 คู่ หรือ 3 คู่พร้อมเหตุผล หรือกด "มาร์กไม่ได้" (หรือ "ข้ามไปก่อน")`, 3500);
       return;
     }
     await advance();
@@ -1098,21 +1111,87 @@
     toast(note ? 'บันทึกหมายเหตุแล้ว' : 'ลบหมายเหตุแล้ว');
   }
 
+  // ---------- เลือกงานถัดไป ----------
+  // ลำดับ: งานที่ยังไม่เสร็จและไม่ได้ข้าม (ไปข้างหน้า) → งานที่ยังไม่เสร็จที่อยู่ก่อนหน้า → งานที่ข้ามไว้ (วนทีละงาน)
+  const isFinalAt = (i) => FINAL.has(statusAt(i));
+  function findForward(from, pred) {
+    for (let i = from + 1; i < totalTasks(); i++) if (pred(i)) return i;
+    return -1;
+  }
+  function findCyclic(from, pred) {          // หลังงานนี้ไปจนสุด แล้ววนจากต้น (ไม่รวมงานนี้)
+    const n = totalTasks();
+    for (let k = 1; k < n; k++) { const i = (from + k) % n; if (pred(i)) return i; }
+    return -1;
+  }
+  const isOpenNormal = (i) => !isFinalAt(i) && statusAt(i) !== 'skipped';
+  const isSkipped = (i) => statusAt(i) === 'skipped';
+
   async function advance() {
     state.busy = true;
     try {
       refreshMarks();
       await maybeForceBackup('ทำครบอีก 10 งาน');
       const n = totalTasks();
-      if (state.index < n - 1) { await showTask(state.index + 1); return; }
-      const left = state.manifest.items.findIndex((it) => !FINAL.has((state.tasks[it.task_id] || {}).status));
+      const fwd = findForward(state.index, isOpenNormal);
+      if (fwd >= 0) { await showTask(fwd); return; }
+      const left = findCyclic(state.index, isOpenNormal);       // งานที่ยังไม่ทำซึ่งอยู่ก่อนหน้า (เช่น ย้อนกลับไปแก้)
+      if (left < 0) {
+        const sk = findCyclic(state.index, isSkipped);
+        if (sk >= 0) {                                           // งานที่ไม่ได้ข้ามครบแล้ว -> กลับไปงานที่ข้ามทีละงาน
+          toast(`ทำงานที่ไม่ได้ข้ามครบแล้ว — กลับไปงานที่ข้ามไว้ (เหลือ ${skippedCount()} งาน)`, 4000);
+          Debug.log(`กลับไปงานที่ข้ามไว้ ${state.manifest.items[sk].task_id}`);
+          await showTask(sk);
+          return;
+        }
+      }
       const btns = [];
       if (left >= 0) btns.push({ label: `ไปงานที่ยังไม่เสร็จ (${state.manifest.items[left].task_id})`, value: 'left', primary: true });
       btns.push({ label: 'จบการทำงาน', value: 'finish', primary: left < 0 }, { label: 'อยู่ที่งานนี้', value: 'stay' });
-      const a = await dialog('ถึงงานสุดท้ายแล้ว', `เสร็จ ${completedCount()}/${n} งาน`, btns);
+      const a = await dialog(left >= 0 ? 'ถึงงานสุดท้ายแล้ว' : 'ทำครบทุกงานแล้ว', `เสร็จ ${completedCount()}/${n} งาน`, btns);
       if (a === 'left') await showTask(left);
       else if (a === 'finish') { state.busy = false; await finish(); }
     } finally { state.busy = false; }
+  }
+
+  // ข้ามไปก่อน: งานนี้ = skipped (จุดที่วางไว้ยังอยู่) แล้วไปงานถัดไป
+  async function skipTask() {
+    const t = task();
+    if (!t || state.busy || FINAL.has(t.status)) return;
+    for (const v of Object.values(viewers)) v.cancelSession();
+    if (t.status !== 'skipped') {
+      t.status = 'skipped';
+      t.updated_at = nowISO();
+      save();
+      Debug.log(`${currentItem().task_id} ข้ามไปก่อน`);
+    }
+    refreshMarks();
+    state.busy = true;
+    try {
+      let nx = findForward(state.index, isOpenNormal);
+      if (nx < 0) nx = findCyclic(state.index, isOpenNormal);
+      if (nx < 0) nx = findCyclic(state.index, isSkipped);
+      if (nx < 0) { toast('เหลืองานนี้งานเดียว — วางจุดให้ครบ หรือกด "มาร์กไม่ได้"', 4000); return; }
+      if (isSkipped(nx)) toast(`ไปงานที่ข้ามไว้ถัดไป (เหลือ ${skippedCount()} งาน)`, 3000);
+      await showTask(nx);
+    } finally { state.busy = false; }
+  }
+
+  // ไปที่งาน: พิมพ์เลขงาน (เช่น 15 หรือ T015)
+  async function jumpTo() {
+    const inp = $('jumpInput');
+    const raw = inp.value.trim();
+    if (!state.manifest || state.busy || !raw) return;
+    const mt = /^[Tt]?0*(\d+)$/.exec(raw);
+    const num = mt ? parseInt(mt[1], 10) : NaN;
+    const items = state.manifest.items;
+    let i = items.findIndex((it) => parseInt(it.task_id.slice(1), 10) === num);
+    if (i < 0 && num >= 1 && num <= items.length) i = num - 1;
+    if (i < 0) { toast(`ไม่มีงานเลข "${raw}" — พิมพ์เลข 1 ถึง ${items.length}`, 3500); return; }
+    inp.value = '';
+    inp.blur();
+    for (const v of Object.values(viewers)) v.cancelSession();
+    Debug.log(`ไปที่งาน ${items[i].task_id}`);
+    await showTask(i);
   }
 
   // ---------- สำรอง / ส่งออก ----------
@@ -1222,6 +1301,20 @@
 
   async function finish() {
     await save();
+    const sk = skippedCount();
+    if (sk) {                       // กันลืม: ยังมีงานที่ข้ามไว้
+      const first = state.manifest.items.findIndex((it) => (state.tasks[it.task_id] || {}).status === 'skipped');
+      const a = await dialog(`ยังมีงานที่ข้ามไว้ ${sk} งาน`, el('div', {}, [
+        el('p', { text: `งานที่กด "ข้ามไปก่อน" นับว่ายังไม่เสร็จ (ทำแล้ว ${completedCount()}/${totalTasks()} งาน)` }),
+        el('p', { text: 'ถ้าจะหยุดวันนี้ กด จบงานไปก่อน ได้ งานที่ข้ามไว้ยังอยู่ และเว็บจะเตือนอีกครั้งครั้งหน้า' }),
+      ]), [
+        { label: `ไปทำงานที่ข้ามไว้ (${state.manifest.items[first].task_id})`, value: 'go', primary: true, id: 'btnFinishGoSkipped' },
+        { label: 'จบงานไปก่อน', value: 'finish', id: 'btnFinishAnyway' },
+        { label: 'ยกเลิก', value: null, id: 'btnFinishCancel' },
+      ]);
+      if (a === 'go') { await showTask(first); return; }
+      if (a !== 'finish') return;
+    }
     await openExport({ forced: true, why: 'จบการทำงาน' });
     await save();
     $('startCloseRow').hidden = false;
@@ -1304,6 +1397,9 @@
   $('btnPrev').addEventListener('click', () => { if (!state.busy) showTask(state.index - 1); });
   $('btnNext').addEventListener('click', goNext);
   $('btnUnmarkable').addEventListener('click', markUnmarkable);
+  $('btnSkip').addEventListener('click', skipTask);
+  $('btnJump').addEventListener('click', jumpTo);
+  $('jumpInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); jumpTo(); } });
   $('btnNote').addEventListener('click', editNote);
   $('btnExport').addEventListener('click', () => openExport({ forced: false }));
   $('btnFinish').addEventListener('click', finish);
@@ -1330,11 +1426,88 @@
     document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
   }
 
+  // ---------- อัปเดตเป็นเวอร์ชันใหม่เอง ----------
+  // ไอคอนบนหน้าจอโฮมของ iPad มักกลับมาจากหน่วยความจำ (ไม่โหลดหน้าใหม่) จึงต้องเช็กเอง:
+  // ตอนเปิดและทุกครั้งที่กลับมาที่หน้าจอ โหลด version.js แบบไม่ใช้แคช (script-src 'self' — ไม่ต้องเปิด connect-src)
+  // ถ้าใหม่กว่า -> บันทึกงาน แล้วโหลดหน้าใหม่ที่ ?v=<เวอร์ชันใหม่> (ข้อมูลในเครื่องไม่ถูกลบ) แล้วกลับเข้างานเดิมเอง
+  const UPD_TRIED = 'pelnavUpdateTried', UPD_RESUME = 'pelnavResumeAfterUpdate';
+  const ss = {
+    get: (k) => { try { return sessionStorage.getItem(k); } catch (_) { return null; } },
+    set: (k, v) => { try { sessionStorage.setItem(k, v); } catch (_) { /* ignore */ } },
+    del: (k) => { try { sessionStorage.removeItem(k); } catch (_) { /* ignore */ } },
+  };
+  function cmpVer(a, b) {
+    const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+    for (let i = 0; i < 3; i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return Math.sign(d); }
+    return 0;
+  }
+  function fetchLatestVersion() {
+    return new Promise((resolve) => {
+      const prev = window.PELNAV_VERSION;
+      const s = document.createElement('script');
+      let settled = false;
+      const done = (v) => {
+        if (settled) return;
+        settled = true;
+        window.PELNAV_VERSION = prev;
+        s.remove();
+        resolve(v);
+      };
+      s.onload = () => done(window.PELNAV_VERSION);
+      s.onerror = () => done(null);                       // ออฟไลน์ -> ข้าม ใช้เวอร์ชันเดิมต่อ
+      setTimeout(() => done(null), 8000);
+      s.src = `version.js?check=${Date.now()}`;
+      document.head.append(s);
+    });
+  }
+  const upd = { lastCheck: 0, latest: null, checkedAt: null, reloading: false };
+  // คืน true ถ้ากำลังโหลดหน้าใหม่
+  async function checkUpdate(why, force = false) {
+    if (upd.reloading) return true;
+    if (!force && why !== 'start' && Date.now() - upd.lastCheck < 30000) return false;
+    upd.lastCheck = Date.now();
+    const latest = await fetchLatestVersion();
+    if (!latest) return false;
+    upd.latest = latest; upd.checkedAt = new Date();
+    const tried = ss.get(UPD_TRIED);
+    if (tried && cmpVer(CFG.APP_VERSION, tried) >= 0) ss.del(UPD_TRIED);
+    if (cmpVer(latest, CFG.APP_VERSION) <= 0) return false;
+    if (ss.get(UPD_TRIED) === latest) {                     // โหลดใหม่ไปแล้วแต่ยังได้ของเก่า (แคช/เซิร์ฟเวอร์ยังไม่อัปเดต) -> ไม่วนโหลด
+      Debug.error(`มีเวอร์ชันใหม่ ${latest} แต่โหลดใหม่แล้วยังได้ ${CFG.APP_VERSION} — ปิดแอปแล้วเปิดใหม่ภายหลัง`);
+      return false;
+    }
+    // อย่าโหลดใหม่ระหว่างวางจุด เก็บภาพ หรือมีหน้าต่างถามค้างอยู่ -> ลองใหม่ภายหลัง
+    const midAction = state.importing || state.busy || !$('dialog').hidden || Object.values(viewers).some((v) => v.session);
+    if (midAction) { setTimeout(() => checkUpdate('retry', true), 5000); return false; }
+    upd.reloading = true;
+    Debug.log(`พบเวอร์ชันใหม่ ${latest} (ตอนนี้ ${CFG.APP_VERSION}) — บันทึกงานแล้วโหลดใหม่`);
+    ss.set(UPD_TRIED, latest);
+    if (state.manifest && state.source === 'local') ss.set(UPD_RESUME, state.manifest.package_id);
+    toast(`มีเวอร์ชันใหม่ (${latest}) — กำลังโหลดใหม่ งานที่ทำไว้ไม่หาย`, 5000);
+    try { await save(); await saveChain; } catch (_) { /* ข้อมูลอยู่ในเครื่องแล้วทุกการแก้ */ }
+    setTimeout(() => { location.replace(`${location.pathname}?v=${encodeURIComponent(latest)}`); }, 800);
+    return true;
+  }
+  // หลังโหลดใหม่เพราะอัปเดต: กลับเข้างานเดิมเอง (ถ้าภาพอยู่ในเครื่องครบ)
+  async function resumeAfterUpdate() {
+    const pkg = ss.get(UPD_RESUME);
+    if (!pkg) return;
+    ss.del(UPD_RESUME);
+    if (!localImagesOn()) return;
+    try {
+      const chk = await ImageStore.check(pkg);
+      if (!chk.ok) return;
+    } catch (_) { return; }
+    Debug.log(`อัปเดตเป็น ${CFG.APP_VERSION} แล้ว — กลับเข้างานเดิม`);
+    if (await resumeLocal(pkg)) toast(`อัปเดตเป็นเวอร์ชัน ${CFG.APP_VERSION} แล้ว · งานที่ทำไว้อยู่ครบ`, 4000);
+  }
+
   // ---------- แผงดีบัก ----------
   function deviceInfo() {
     const lines = [
       `app ${CFG.APP_VERSION} · storage ${state.storage.ok ? 'ok' : 'BLOCKED'} · เก็บถาวร (persist)=${state.storage.persisted}`,
       `พื้นที่ที่เว็บใช้ ${state.storage.usageMB != null ? state.storage.usageMB : '?'} MB จากโควตา ${state.storage.quotaMB != null ? state.storage.quotaMB : '?'} MB`,
+      `เวอร์ชันล่าสุดบนเว็บ: ${upd.latest || 'ยังไม่ได้เช็ก/ออฟไลน์'}${upd.checkedAt ? ` (เช็ก ${upd.checkedAt.toLocaleTimeString('th-TH')})` : ''}`,
       `ภาพจาก: ${state.source === 'local' ? `ในเครื่อง (${state.localRec ? Math.round(state.localRec.bytes / 1e6) : '?'} MB, ${state.localRec ? state.localRec.total_files : '?'} ไฟล์)` : 'ไฟล์ที่เลือก'}${localImagesOn() ? '' : ' · ปิดการเก็บภาพในเครื่อง'}`,
       `viewport ${window.innerWidth}×${window.innerHeight} CSS px · dpr ${window.devicePixelRatio}`,
       `pointer types: ${[...pointerTypesSeen].join(', ') || '-'} · นิ้ววางจุด: ${state.fingerMode ? 'เปิด' : 'ปิด'}`,
@@ -1381,11 +1554,12 @@
       ` · เก็บถาวร=${state.storage.persisted} · ใช้พื้นที่ ${state.storage.usageMB} MB`);
     await renderStart();
     document.body.dataset.ready = '1';
+    checkUpdate('start').then((reloading) => { if (!reloading) resumeAfterUpdate(); });
   })();
 
   // ให้สคริปต์ทดสอบอัตโนมัติเข้าถึงได้
   window.__marker = {
-    state, viewers, showTask, Debug, setFingerMode, undo, deleteSelected, goNext, save, editNote, resumeLocal, refreshUsage,
+    state, viewers, showTask, Debug, setFingerMode, undo, deleteSelected, goNext, save, editNote, resumeLocal, refreshUsage, skipTask, checkUpdate,
     flushSave: () => saveChain,
     marks: () => { const t = task(); return t && { xray: t.xray, fluoro: t.fluoro, undo: (state.undo[currentItem().task_id] || []).length, status: t.status }; },
     task: () => task(),
