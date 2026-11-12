@@ -9,7 +9,7 @@
   Q  เตือนจุดเกือบแนวเดียวกัน / กระจุกตัว (เอกซเรย์เทียบกรอบ)
   T  จับเวลา · P ปรับภาพ (กลับสี) ไม่กระทบพิกัด
   D  ข้อมูลห้ามหาย: บันทึกอัตโนมัติ, ปิดแท็บแล้วเปิดใหม่, หน้าแรกแสดงสถานะ, ส่งออก CSV/JSON,
-     นำเข้าอีกเครื่อง, ลบ IndexedDB แล้วนำเข้า (ตรงทุกค่า), รวม/แทนที่, บังคับสำรองทุก 10 งาน + เลื่อนได้ 1 ครั้ง,
+     นำเข้าอีกเครื่อง, ลบ IndexedDB แล้วนำเข้า (ตรงทุกค่า), รวม/แทนที่, สำรอง (บังคับตอนจบงาน + เตือนงานรอบก่อนที่ยังไม่สำรอง),
      จบงาน, โหมดส่วนตัว (จำลอง) ต้องห้ามเริ่มงาน
   C  ไม่มีคำขอเครือข่ายออกนอกเครื่อง / ไม่มี error ในหน้า
 """
@@ -434,40 +434,65 @@ def check_csv(res, path, data, m):
 
 
 def test_forced_backup(env: Env):
+    """v0.9.0: ไม่บังคับสำรองระหว่างทำ · บังคับเฉพาะตอนกด จบงาน (ไม่มีเลื่อน) · ปิดเว็บโดยไม่กดจบงาน
+    → เปิดครั้งหน้ามีกรอบเตือน + ปุ่ม สำรองทันที"""
     res = env.res
     pkg = "test_package_big"
+    pid = manifest(pkg)["package_id"]
     c = env.ctx()
     p = env.page(c)
     open_pkg(p, pkg)
-    titles = []
     for i in range(10):
         p.click("#btnUnmarkable")
         choose_reason(p, "unclear")
-        if i < 9:
-            p.wait_for_function(f"() => window.__marker.state.index === {i + 1}")
-    title = wait_dialog(p)
-    has_snooze = p.is_visible("#btnSnooze")
-    res.check("สำรอง" in title and has_snooze, "D ครบ 10 งาน → บังคับสำรอง (มีปุ่ม เลื่อนไปก่อน)", title)
-    p.click("#btnSnooze")
-    p.wait_for_function("() => window.__marker.state.index === 10")
+        p.wait_for_function(f"() => window.__marker.state.index === {i + 1} && window.__marker.state.imagesReady")
+    res.check(p.is_hidden("#dialog") and p.evaluate("() => window.__marker.state.index") == 10,
+              "D ทำครบ 10 งาน → ไม่มีหน้าต่างบังคับสำรองระหว่างทำ", "")
+
+    # ปิดเว็บโดยไม่กดจบงาน -> เปิดครั้งหน้า: กรอบเตือน + ปุ่ม สำรองทันที (ดาวน์โหลดได้ทันที ไม่ต้องเปิดงาน)
+    flush(p)
+    p.close()
+    p = env.page(c)
+    p.wait_for_selector("#backupReminder:not([hidden])", timeout=5000)
+    box = p.text_content("#backupReminder") or ""
+    name, path = download(p, "#btnBackupNow", "reminder")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    p.wait_for_selector("#backupReminder", state="hidden", timeout=5000)
+    rec = idb_record(p, pid)
+    res.check("ยังไม่ได้สำรองงานรอบก่อน" in box and pid in box and name.endswith("_10of12.json")
+              and Exporter_count(data) == 10 and rec["last_backup_at"] is not None,
+              "D ปิดเว็บโดยไม่กดจบงาน → เปิดครั้งหน้าเตือน + ปุ่ม สำรองทันที (ได้ไฟล์ครบ 10 งาน แล้วกรอบหายไป)", box[:90])
+    p.close()
+    p = env.page(c)
+    p.wait_for_timeout(300)
+    res.check(p.is_hidden("#backupReminder"), "D สำรองแล้ว → เปิดครั้งหน้าไม่เตือนซ้ำ", "")
+
+    # งานที่แก้ในรอบนี้ไม่ทำให้กรอบเตือนขึ้น (จะสำรองตอนกดจบงาน)
+    open_pkg(p, pkg)
     p.click("#btnUnmarkable")
     choose_reason(p, "unclear")
-    wait_dialog(p)
-    no_snooze = not p.is_visible("#btnSnooze") and not p.is_visible("#btnExportClose")
-    name, path = download(p, "#btnDlJson", "forced")
-    p.wait_for_function("() => window.__marker.state.index === 11")
-    res.check(no_snooze and re.search(r"_11of12\.json$", name) is not None, "D เลื่อนได้ 1 ครั้ง แล้วต้องดาวน์โหลด", name)
-    # จบงาน -> บังคับสำรองอีก แล้วกลับหน้าแรก
+    p.wait_for_function("() => window.__marker.state.index === 11 && window.__marker.state.imagesReady")
+    p.click("#btnOpen")
+    p.wait_for_timeout(300)
+    res.check(p.is_hidden("#backupReminder"), "D งานที่แก้ในรอบนี้ ไม่ขึ้นกรอบเตือนรอบก่อน", "")
+    p.click("#btnStartClose")
+
+    # จบงาน -> บังคับสำรอง (ไม่มีปุ่มเลื่อน ไม่มีปุ่มปิด) แล้วกลับหน้าแรก
     p.click("#btnFinish")
     title = wait_dialog(p)
+    no_escape = not p.is_visible("#btnSnooze") and not p.is_visible("#btnExportClose")
     name2, _ = download(p, "#btnDlJson", "finish")
     p.wait_for_selector("#startScreen:not([hidden])")
     p.wait_for_function("() => !document.getElementById('savedList').textContent.includes('ยังไม่เคยสำรอง')")
     saved = p.text_content("#savedList") or ""
-    res.check("สำรอง" in title and name2.endswith("_11of12.json") and "สำรองล่าสุด" in saved,
-              "D กดจบงาน → บังคับสำรอง → กลับหน้าแรกพร้อมสถานะ", saved.replace("\n", " ")[:150])
+    res.check("สำรอง" in title and no_escape and name2.endswith("_11of12.json") and "สำรองล่าสุด" in saved,
+              "D กดจบงาน → บังคับสำรอง (เลื่อนไม่ได้) → กลับหน้าแรกพร้อมสถานะ", " ".join(saved.split())[:150])
     check_page_errors(p, res, "หน้าทดสอบสำรอง")
     c.close()
+
+
+def Exporter_count(data):
+    return sum(1 for t in data["tasks"].values() if t["status"] in ("done", "partial", "unmarkable"))
 
 
 FAKE_LOST_FILES = """() => {
@@ -893,6 +918,23 @@ def test_ios_share(env: Env):
     res.check("PelNav สำรอง" not in hint and "เลือกโฟลเดอร์" not in hint, "I คำแนะนำในหน้าต่างไม่พูดถึงโฟลเดอร์เฉพาะ", hint[:120])
     rec = idb_record(p, m["package_id"])
     res.check(rec["last_backup_at"] is not None, "I แชร์สำเร็จ = บันทึกเวลาสำรองล่าสุด", str(rec["last_backup_at"]))
+    # แก้งานต่อแล้วปิดแอปโดยไม่กดจบงาน -> เปิดใหม่ กรอบเตือนใช้ปุ่มบันทึกลงแอปไฟล์ (แชร์)
+    p.click("#btnExportClose")
+    p.evaluate("() => { window.__shared.length = 0; }")
+    p.click("#btnUnmarkable")
+    choose_reason(p, "unclear")
+    p.wait_for_function("() => window.__marker.state.index === 2")
+    flush(p)
+    p.close()
+    p = env.page(c)
+    p.wait_for_selector("#btnBackupNow")
+    label = p.text_content("#btnBackupNow") or ""
+    p.click("#btnBackupNow")
+    p.wait_for_function("() => window.__shared.length === 1")
+    p.wait_for_selector("#backupReminder", state="hidden", timeout=5000)
+    sh = p.evaluate("() => window.__shared[0]")
+    res.check("แอปไฟล์" in label and len(sh["files"]) == 1 and sh["files"][0]["name"].endswith("_2of6.json"),
+              "I iPad: กรอบเตือนงานรอบก่อน → สำรองทันทีด้วยการบันทึกลงแอปไฟล์", label)
     check_page_errors(p, res, "หน้าทดสอบแชร์")
     c.close()
 

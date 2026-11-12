@@ -229,13 +229,13 @@ textarea.text-input { resize: vertical; min-height: 80px; line-height: 1.4; }
   inset: 0;
   z-index: 10;
   display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 16px;
   background: rgba(10, 11, 13, 0.92);
   overflow: auto;
 }
 .overlay[hidden] { display: none; }
+/* กึ่งกลางด้วย margin: auto — ถ้าเนื้อหายาวกว่าจอ ส่วนบนไม่ถูกตัด (align-items: center จะตัดส่วนบนทิ้งแบบเลื่อนไม่ถึง) */
+.overlay > .card { margin: auto; }
 .card {
   width: min(640px, 100%);
   background: var(--panel);
