@@ -658,7 +658,7 @@
       'ที่เก็บข้อมูลในเครื่อง: ', el('span', { class: 'ok-text', text: 'ใช้ได้' }),
       ' · เบราว์เซอร์รับปากไม่ลบเอง: ',
       st.persisted ? el('span', { class: 'ok-text', text: 'ได้' })
-        : el('span', { class: 'err-text', text: st.persisted === false ? 'ไม่ได้ (สำรองบ่อย ๆ)' : 'ไม่ทราบ (สำรองบ่อย ๆ)' }),
+        : el('span', { class: 'err-text', text: st.persisted === false ? 'ไม่ได้ (กด ส่งออก เป็นระยะ)' : 'ไม่ทราบ (กด ส่งออก เป็นระยะ)' }),
     ]));
     let recs = [];
     try { recs = (await Store.list()).filter((r) => r.package_id !== '__probe__'); } catch (e) { Debug.error(e); }
@@ -677,7 +677,69 @@
       ]));
     }
     $('noDataBox').hidden = recs.length > 0;
+    renderBackupReminder(recs);
     await renderLocalBox(recs);
+  }
+
+  // ---------- เตือนสำรองงานรอบก่อน ----------
+  // งาน "รอบก่อน" ที่ยังไม่ได้สำรอง = มีงานที่แก้หลังสำรองครั้งล่าสุด และก่อนเปิดเว็บรอบนี้
+  // (เกิดเมื่อปิดเว็บโดยไม่กด จบงาน) · งานที่แก้ในรอบนี้ไม่นับ (จะสำรองตอนกด จบงาน)
+  const PAGE_OPENED_AT = nowISO();
+  function unbackedBefore(r, until) {
+    const since = r.last_backup_at || '';
+    return Object.values(r.tasks || {}).filter((t) => t && t.updated_at && t.updated_at > since && t.updated_at < until);
+  }
+  function renderBackupReminder(recs) {
+    const box = $('backupReminder');
+    box.innerHTML = '';
+    const due = recs.filter((r) => unbackedBefore(r, PAGE_OPENED_AT).length)
+      .sort((a, b) => ((a.saved_at || '') < (b.saved_at || '') ? 1 : -1));
+    box.hidden = !due.length;
+    if (!due.length) return;
+    const r = due[0];
+    const lastEdit = unbackedBefore(r, PAGE_OPENED_AT).map((t) => t.updated_at).sort().pop();
+    const ctx = { package_id: r.package_id, app_version: CFG.APP_VERSION, total_tasks: r.total_tasks,
+      current_index: r.current_index || 0, tasks: r.tasks };
+    const done = Exporter.countFinal(r.tasks);
+    const name = Exporter.jsonFilename(r.package_id, done, r.total_tasks || '?');
+    const text = Exporter.buildJSON(ctx);              // เตรียมไว้ก่อน: iPad ต้องเรียกแชร์ทันทีที่แตะปุ่ม
+    box.append(el('b', { text: 'ยังไม่ได้สำรองงานรอบก่อน' }), el('br'),
+      `งาน ${r.package_id}: แก้ไขล่าสุด ${timeTH(lastEdit)} · สำรองล่าสุด: ${r.last_backup_at ? timeTH(r.last_backup_at) : 'ยังไม่เคยสำรอง'}`, el('br'),
+      'ครั้งก่อนปิดเว็บโดยยังไม่ได้กด จบงาน ควรสำรองไฟล์ไว้ก่อนทำงานต่อ');
+    const row = el('div', { class: 'row' });
+    const useShare = isIOS && Exporter.canShareFiles();
+    const btn = el('button', { class: 'btn btn-primary btn-big', id: 'btnBackupNow',
+      text: useShare ? 'สำรองทันที (บันทึกลงแอปไฟล์)' : 'สำรองทันที (ดาวน์โหลดไฟล์สำรอง)' });
+    btn.addEventListener('click', async () => {
+      try {
+        if (useShare) await Exporter.share(text, name, 'application/json');
+        else Exporter.download(text, name, 'application/json');
+      } catch (e) {
+        if (e && e.name === 'AbortError') toast('ยกเลิกแล้ว — ยังไม่ได้สำรอง');
+        else toast(`สำรองไม่ได้: ${(e && e.message) || e} — ลองกด ส่งออก หลังเปิดงาน`, 5000);
+        return;
+      }
+      await markBackedUp(r.package_id, done);
+      Debug.log(`สำรองงานรอบก่อน ${name}`);
+      toast('สำรองแล้ว ส่งไฟล์นี้ให้ทีมได้', 3500);
+      renderStart();
+    });
+    row.append(btn);
+    box.append(row);
+  }
+  // บันทึกเวลาสำรองลงเครื่อง (ทั้งในหน่วยความจำ ถ้าแพ็กเกจนี้เปิดอยู่ และในฐานข้อมูล)
+  async function markBackedUp(pkg, done) {
+    const at = nowISO();
+    if (state.manifest && state.manifest.package_id === pkg) {
+      state.meta.last_backup_at = at;
+      state.meta.last_backup_completed = completedCount();
+      await save();
+      return;
+    }
+    try {
+      const rec = await Store.get(pkg);
+      if (rec) { rec.last_backup_at = at; rec.last_backup_completed = done; await Store.put(rec); }
+    } catch (e) { Debug.error(`บันทึกเวลาสำรองไม่ได้: ${e && (e.message || e)}`); }
   }
 
   // กล่องภาพในเครื่อง: ครบ -> ปุ่ม ทำงานต่อ · ไม่ครบ/หาย -> ข้อความให้เลือกแพ็กเกจใหม่ · ทุกกรณีที่มีภาพ -> ปุ่ม ลบภาพ
@@ -1130,7 +1192,6 @@
     state.busy = true;
     try {
       refreshMarks();
-      await maybeForceBackup('ทำครบอีก 10 งาน');
       const n = totalTasks();
       const fwd = findForward(state.index, isOpenNormal);
       if (fwd >= 0) { await showTask(fwd); return; }
@@ -1201,15 +1262,6 @@
       current_index: state.index, tasks: JSON.parse(JSON.stringify(state.tasks)), items: state.manifest.items,
     };
   }
-  function backupDue() {
-    const c = completedCount();
-    if (c - state.meta.last_backup_completed < CFG.backup.everyNTasks) return false;
-    return !state.meta.backup_snoozed || c >= state.meta.snooze_until;
-  }
-  async function maybeForceBackup(why) {
-    if (backupDue()) await openExport({ forced: true, why });
-  }
-
   function recordBackup() {
     state.meta.last_backup_at = nowISO();
     state.meta.last_backup_completed = completedCount();
@@ -1218,14 +1270,14 @@
     save();
   }
 
-  // forced: ต้องดาวน์โหลด (หรือเลื่อนได้ 1 ครั้ง) จึงจะปิดได้
+  // forced (ตอนกด จบงาน): ต้องสำรองจึงจะปิดได้ · ไม่ forced (ปุ่ม ส่งออก): สำรองเมื่อไหร่ก็ได้
   function openExport({ forced, why }) {
     return new Promise((resolve) => {
       const ctx = exportCtx();
       const done = Exporter.countFinal(ctx.tasks);
       const body = el('div', { class: 'summary' });
-      if (forced) body.append(el('p', {}, [el('b', { text: `ถึงเวลาสำรองข้อมูล (${why})` }), el('br'),
-        'ดาวน์โหลดไฟล์สำรองเก็บไว้ แล้วส่งให้ทีมหลังทำแต่ละรอบ']));
+      if (forced) body.append(el('p', {}, [el('b', { text: `สำรองข้อมูลก่อน${why}` }), el('br'),
+        'เก็บไฟล์สำรองไว้ แล้วส่งให้ทีมหลังทำแต่ละรอบ']));
       body.append(el('table', {}, [
         el('tr', {}, [el('td', { text: 'แพ็กเกจ' }), el('td', { text: ctx.package_id })]),
         el('tr', {}, [el('td', { text: 'ทำแล้ว' }), el('td', { text: `${done}/${ctx.total_tasks} งาน` })]),
@@ -1286,14 +1338,6 @@
           note.textContent = `ดาวน์โหลดแล้ว: ${name}`;
         });
         mk('ปิด', 'btnExportClose', false, () => close('closed'));
-      } else if (!state.meta.backup_snoozed) {
-        mk('เลื่อนไปก่อน (ได้ 1 ครั้ง)', 'btnSnooze', false, () => {
-          state.meta.backup_snoozed = true;
-          state.meta.snooze_until = completedCount() + 1;
-          save();
-          toast('เลื่อนแล้ว — จะถามอีกครั้งหลังทำเสร็จอีก 1 งาน และเลื่อนไม่ได้อีก', 3500);
-          close('snoozed');
-        });
       }
       $('dialog').hidden = false;
     });
@@ -1315,7 +1359,7 @@
       if (a === 'go') { await showTask(first); return; }
       if (a !== 'finish') return;
     }
-    await openExport({ forced: true, why: 'จบการทำงาน' });
+    await openExport({ forced: true, why: 'จบงาน' });
     await save();
     $('startCloseRow').hidden = false;
     $('startScreen').hidden = false;

@@ -13,7 +13,7 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-180.png">
 <title>PelNavPlan Landmark Marker</title>
-<link rel="stylesheet" href="style.css?v=0.8.2">
+<link rel="stylesheet" href="style.css?v=0.9.0">
 </head>
 <body>
 
@@ -94,6 +94,8 @@
     <h1>PelNavPlan · มาร์กจุดอ้างอิง</h1>
     <p class="small muted">ภาพเปิดและเก็บไว้ในเครื่องนี้เท่านั้น ไม่ถูกส่งไปที่ใด · งานบันทึกในเครื่องอัตโนมัติ</p>
     <div id="storageStatus" class="status"></div>
+    <!-- เตือน: งานรอบก่อนยังไม่ได้สำรอง (ปิดเว็บโดยไม่กด จบงาน) -->
+    <div id="backupReminder" class="box-err" hidden></div>
     <div id="savedList"></div>
     <div id="noDataBox" class="box-warn" hidden>
       <b>ไม่พบงานที่บันทึกไว้ในเครื่องนี้</b><br>
@@ -164,13 +166,13 @@
   <pre id="debugLog"></pre>
 </aside>
 
-<script src="version.js?v=0.8.2"></script>
-<script src="config.js?v=0.8.2"></script>
-<script src="viewer.js?v=0.8.2"></script>
-<script src="loader.js?v=0.8.2"></script>
-<script src="store.js?v=0.8.2"></script>
-<script src="imagestore.js?v=0.8.2"></script>
-<script src="exporter.js?v=0.8.2"></script>
-<script src="app.js?v=0.8.2"></script>
+<script src="version.js?v=0.9.0"></script>
+<script src="config.js?v=0.9.0"></script>
+<script src="viewer.js?v=0.9.0"></script>
+<script src="loader.js?v=0.9.0"></script>
+<script src="store.js?v=0.9.0"></script>
+<script src="imagestore.js?v=0.9.0"></script>
+<script src="exporter.js?v=0.9.0"></script>
+<script src="app.js?v=0.9.0"></script>
 </body>
 </html>
