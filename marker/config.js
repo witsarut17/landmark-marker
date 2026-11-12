@@ -1,6 +1,6 @@
 // ค่าตั้งทั้งหมดของเว็บ แก้ที่ไฟล์นี้ไฟล์เดียว (ไม่ต้องแตะโค้ดส่วนอื่น)
 window.MARKER_CONFIG = Object.freeze({
-  APP_VERSION: '0.7.0',
+  APP_VERSION: window.PELNAV_VERSION || '0.0.0',   // ตั้งใน version.js
 
   view: Object.freeze({
     fitMargin: 0.96,             // ตอนรีเซ็ต ภาพกินพื้นที่ 96% ของช่อง

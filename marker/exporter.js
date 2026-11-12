@@ -5,7 +5,7 @@
   const FORMAT = 'pelnav-marks';
   const FORMAT_VERSION = 1;
   const FINAL = new Set(['done', 'partial', 'unmarkable']);
-  const STATUSES = new Set(['todo', 'in_progress', 'done', 'partial', 'unmarkable']);
+  const STATUSES = new Set(['todo', 'in_progress', 'skipped', 'done', 'partial', 'unmarkable']);   // skipped = ข้ามไว้ (ยังไม่เสร็จ)
   const COORD_CONVENTION = 'COCO pixel coordinates; origin (0,0) = top-left corner of the top-left pixel; '
     + 'pixel (i,j) center = (i+0.5, j+0.5); x to the right, y down; units = pixels of the original image file';
 
