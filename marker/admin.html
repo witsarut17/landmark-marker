@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<!-- หน้าทีมวิจัย: ดูความคืบหน้าของแพทย์ และดาวน์โหลดผล (JSON/CSV รูปแบบเดียวกับไฟล์สำรองของเว็บ) — ใช้ได้เฉพาะบนเซิร์ฟเวอร์ -->
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; connect-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>PelNav — หน้าทีมวิจัย</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body class="admin">
+<div class="admin-wrap">
+  <div class="admin-top">
+    <div>
+      <h1>PelNav · หน้าทีมวิจัย</h1>
+      <div class="small muted" id="who"></div>
+    </div>
+    <button class="btn" id="btnLogout" hidden>ออกจากระบบ</button>
+  </div>
+
+  <div class="card" id="loginCard" hidden>
+    <h2 class="small-h">เข้าสู่ระบบ (บัญชีทีม)</h2>
+    <form class="admin-form" id="loginForm">
+      <input id="username" name="username" autocomplete="username" placeholder="ชื่อผู้ใช้" required>
+      <input id="password" name="password" type="password" autocomplete="current-password" placeholder="รหัสผ่าน" required>
+      <button class="btn btn-primary" type="submit" id="btnLogin">เข้าสู่ระบบ</button>
+      <div class="err-text" id="loginErr"></div>
+    </form>
+  </div>
+
+  <div class="card" id="overviewCard" hidden>
+    <div class="admin-top">
+      <h2 class="small-h">ความคืบหน้าของแพทย์</h2>
+      <button class="btn btn-small" id="btnRefresh">รีเฟรช</button>
+    </div>
+    <div class="small muted" id="backupInfo"></div>
+    <table class="prog">
+      <thead><tr><th>แพทย์</th><th>แพ็กเกจ</th><th>ทำแล้ว</th><th>ข้ามไว้</th><th>บันทึกล่าสุด</th><th>ดาวน์โหลดผล</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="small muted">ไฟล์มีเพียงรหัสงาน พิกัด สถานะ และเวลา ไม่มีภาพหรือข้อมูลผู้ป่วย · อ่าน CSV ด้วย pandas: <code>pd.read_csv(path, comment='#', encoding='utf-8-sig')</code></div>
+  </div>
+  <div class="err-text" id="pageErr"></div>
+</div>
+<script src="exporter.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>
