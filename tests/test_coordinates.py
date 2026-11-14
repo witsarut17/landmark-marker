@@ -101,11 +101,16 @@ class Quiet(SimpleHTTPRequestHandler):
         pass
 
 
+SERVER = None        # TestServer (v1.0: เว็บเปิดแพ็กเกจจากเซิร์ฟเวอร์)
+
+
 def start_server():
-    handler = functools.partial(Quiet, directory=str(ROOT))
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+    """เซิร์ฟเวอร์จริงของโครงการ (ข้อมูลชั่วคราว ภาพทดสอบ) · คืน (server, base) โดย server.shutdown() ปิดและลบข้อมูล"""
+    global SERVER
+    from server_fixture import TestServer
+    SERVER = TestServer()
+    SERVER.shutdown = SERVER.stop
+    return SERVER, SERVER.base
 
 
 class Results:
@@ -120,15 +125,13 @@ class Results:
 
 
 def package_files(name: str, skip: str | None = None):
-    d = GEN / name
-    return [str(p) for p in sorted(d.iterdir()) if p.is_file() and p.name != "targets.json" and p.name != skip]
+    """v1.0: แพ็กเกจอยู่บนเซิร์ฟเวอร์ — คืนชื่อแพ็กเกจ (ใช้กับ open_package)"""
+    return name
 
 
 def open_package(page, base, files, goto=True):
-    if goto:
-        page.goto(f"{base}/marker/index.html")
-    page.wait_for_selector("body[data-ready='1']")
-    page.set_input_files("#inputFiles", files)
+    """เข้าสู่ระบบด้วยบัญชีแพทย์ใหม่ (งานว่าง) แล้วเปิดแพ็กเกจ files (ชื่อแพ็กเกจ) จากเซิร์ฟเวอร์ทดสอบ"""
+    return SERVER.open(page, files)
 
 
 def wait_loaded(page):
@@ -581,32 +584,41 @@ def run_layout(pw_browser, base, targets, res: Results, name, vp, dpr, touch, ta
         workflow_tests(page, ctx, res, name, targets, manifest)
 
     outside = [(m, u) for m, u in requests if not (u.startswith(base) or u.startswith("blob:") or u.startswith("data:"))]
-    posts = [(m, u) for m, u in requests if m != "GET"]
-    img_fetch = [u for m, u in requests if u.startswith(base) and "/tests/" in u]
-    res.check(not outside and not posts and not img_fetch, f"C เครือข่าย [{name}]",
-              f"คำขอ {len(requests)} · นอกเครื่อง {outside} · ไม่ใช่ GET {posts} · โหลดภาพจากเซิร์ฟเวอร์ {img_fetch}")
+    posts = [(m, u) for m, u in requests if m != "GET" and not u.startswith(base + "/api/")]
+    # ภาพของงานต้องมาจาก /api/image เท่านั้น (ไม่มีการขอไฟล์ภาพตรง ๆ เช่น /tests/... หรือ T001_X.png) · ไอคอนเว็บไม่นับ
+    img_ok = not [u for m, u in requests if u.startswith(base) and ("/tests/" in u or "_X." in u or "_F." in u)
+                  and "/api/image/" not in u]
+    res.check(not outside and not posts and img_ok, f"C เครือข่าย [{name}]",
+              f"คำขอ {len(requests)} · นอกเซิร์ฟเวอร์ {outside} · เขียนนอก /api {posts} · ภาพนอก /api/image {not img_ok}")
     res.check(not errors, f"C ไม่มี JS error [{name}]", "; ".join(errors))
     check_no_ro_errors(page, res, f"[{name}]")
     ctx.close()
 
 
 def run_blocking(pw_browser, base, res: Results):
-    ctx = pw_browser.new_context(viewport={"width": 1366, "height": 768})
-    page = ctx.new_page()
+    """แพ็กเกจเสีย -> หน้าต่าง หยุด และไม่แสดงภาพ (ขนาดไม่ตรง, EXIF หมุน, ภาพหายจากเซิร์ฟเวอร์ระหว่างใช้งาน, manifest เสีย)"""
+    miss = SERVER.broken_copy("missing_image")          # ภาพ T003_F ถูกลบหลังเปิดแพ็กเกจแล้ว (ดูด้านล่าง)
+    bad = SERVER.broken_copy("bad_manifest", corrupt_manifest=True)
     cases = [
-        ("bad_size_package", None, "ขนาดภาพไม่ตรง"),
-        ("bad_exif_package", None, "EXIF Orientation = 6"),
-        ("test_package", "T003_F.jpg", "ขาดไฟล์ภาพ 1 ไฟล์"),
-        ("test_package", "manifest.json", "ไม่พบไฟล์ manifest.json"),
+        ("bad_size_package", 0, "ขนาดภาพไม่ตรง"),
+        ("bad_exif_package", 0, "EXIF Orientation = 6"),
+        (miss, 2, "ไม่พบภาพ"),
+        (bad, None, "เปิดแพ็กเกจ"),
     ]
-    for pkg, skip, expect in cases:
-        open_package(page, base, package_files(pkg, skip))
-        page.wait_for_selector("#errorModal:not([hidden])", timeout=5000)
+    for pkg, task_i, expect in cases:
+        ctx = pw_browser.new_context(viewport={"width": 1366, "height": 768})
+        page = ctx.new_page()
+        open_package(page, base, pkg)
+        if task_i:
+            page.wait_for_function("() => window.__marker.state.imagesReady")
+            (SERVER.tmp / "pkgs" / "missing_image" / "T003_F.jpg").unlink()
+            page.evaluate(f"() => {{ window.__marker.showTask({task_i}); }}")
+        page.wait_for_selector("#errorModal:not([hidden])", timeout=8000)
         title = page.text_content("#errorTitle") or ""
         imgs = page.evaluate("() => [!!window.__marker.viewers.xray.img, !!window.__marker.viewers.fluoro.img]")
-        res.check(expect in title and not any(imgs), f"C หยุดเมื่อ {pkg}{' ไม่มี ' + skip if skip else ''}",
+        res.check(expect in title and not any(imgs), f"C หยุดเมื่อ {pkg}{' งานที่ ' + str(task_i + 1) if task_i else ''}",
                   f"ข้อความ: {title} · ภาพแสดงอยู่: {imgs}")
-    ctx.close()
+        ctx.close()
 
 
 def main():

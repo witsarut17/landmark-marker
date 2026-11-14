@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<!-- ไม่มีการโหลดอะไรจากภายนอก: ไม่มี CDN, ไม่มี analytics, ไม่มีฟอนต์ภายนอก -->
+<!-- ไม่มีการโหลดอะไรจากภายนอก: ไม่มี CDN, ไม่มี analytics, ไม่มีฟอนต์ภายนอก · ติดต่อได้เฉพาะเซิร์ฟเวอร์ของโครงการเอง (connect-src 'self') -->
 <html lang="th">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' blob: data:; connect-src 'none'; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+      content="default-src 'self'; img-src 'self' blob: data:; connect-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -13,13 +13,12 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-180.png">
 <title>PelNavPlan Landmark Marker</title>
-<link rel="stylesheet" href="style.css?v=0.9.0">
+<link rel="stylesheet" href="style.css?v=1.0.0">
 </head>
 <body>
 
 <header id="topbar">
   <div class="group">
-    <button id="btnOpen" class="btn" title="หน้าแรก / เปิดแพ็กเกจ / นำเข้าไฟล์สำรอง">หน้าแรก</button>
     <span id="taskLabel" class="task-label">— / —</span>
     <span id="progress" class="muted"></span>
     <span class="jump-box">
@@ -39,16 +38,16 @@
     <button id="btnFinger" class="btn" aria-pressed="false" title="เปิดเมื่อไม่ได้ใช้ Apple Pencil">นิ้ววางจุด: ปิด</button>
   </div>
   <div class="group">
-    <button id="btnExport" class="btn" disabled>ส่งออก</button>
-    <button id="btnFinish" class="btn" disabled>จบงาน</button>
+    <button id="btnFinish" class="btn" disabled title="ส่งงานที่ค้างให้ครบ แล้วพักหรือออกจากระบบ">พักงาน</button>
     <span id="saveLabel" class="muted small"></span>
+    <span id="userLabel" class="muted small" title="บัญชีที่เข้าสู่ระบบ"></span>
     <button id="btnDebug" class="btn btn-ghost" title="แผงดีบัก">ดีบัก</button>
   </div>
 </header>
 
 <div id="hintBar">
   <span id="hintChip" class="chip"></span>
-  <span id="hintText">เปิดแพ็กเกจเพื่อเริ่ม</span>
+  <span id="hintText">กำลังเปิดงาน…</span>
   <span id="pairCount" class="muted"></span>
   <span id="warnText" class="warn"></span>
   <button id="btnNote" class="btn btn-small" disabled title="หมายเหตุสั้น ๆ ของงานนี้ (ไม่บังคับ)">หมายเหตุ</button>
@@ -88,50 +87,27 @@
   </section>
 </main>
 
-<!-- หน้าแรก -->
+<!-- หน้าแรก: เข้าสู่ระบบ / สถานะการเชื่อมต่อ -->
 <div id="startScreen" class="overlay">
   <div class="card">
     <h1>PelNavPlan · มาร์กจุดอ้างอิง</h1>
-    <p class="small muted">ภาพเปิดและเก็บไว้ในเครื่องนี้เท่านั้น ไม่ถูกส่งไปที่ใด · งานบันทึกในเครื่องอัตโนมัติ</p>
-    <div id="storageStatus" class="status"></div>
-    <!-- เตือน: งานรอบก่อนยังไม่ได้สำรอง (ปิดเว็บโดยไม่กด จบงาน) -->
-    <div id="backupReminder" class="box-err" hidden></div>
-    <div id="savedList"></div>
-    <div id="noDataBox" class="box-warn" hidden>
-      <b>ไม่พบงานที่บันทึกไว้ในเครื่องนี้</b><br>
-      ถ้าเคยทำไว้ (เครื่องอื่น หรือข้อมูลถูกลบ) ให้ <b>นำเข้าไฟล์สำรอง</b> ก่อนเริ่มงาน
-      <div class="row">
-        <label class="btn btn-primary btn-big file-btn">นำเข้าไฟล์สำรอง
-          <input type="file" class="inputBackup" accept=".json,application/json" hidden></label>
-      </div>
+    <p class="small muted">ภาพเปิดจากเซิร์ฟเวอร์ของโครงการ (ผ่าน VPN) · จุดที่วางบันทึกขึ้นเซิร์ฟเวอร์อัตโนมัติ ไม่ต้องสำรองหรือส่งไฟล์</p>
+    <div id="startMsgBox" class="status-box" hidden>
+      <p id="startMsg" class="status"></p>
+      <div class="row"><button id="btnRetry" class="btn btn-primary btn-big" hidden>ลองใหม่</button></div>
     </div>
-    <!-- ภาพที่เก็บไว้ในเครื่อง: ทำงานต่อได้โดยไม่ต้องเลือกไฟล์ / ลบภาพเมื่อทำเสร็จ -->
-    <div id="localBox" hidden></div>
-    <div id="importBox" hidden>
-      <div class="small"><b>กำลังเก็บภาพไว้ในเครื่อง</b> — อย่าปิดเว็บหรือสลับแอปจนกว่าจะเสร็จ</div>
-      <progress id="importBar" max="1" value="0"></progress>
-      <div id="importText" class="small muted"></div>
+    <div id="loginCard" hidden>
+      <h2 class="small-h">เข้าสู่ระบบ</h2>
+      <p id="loginMsg" class="small err-text"></p>
+      <form id="loginForm" class="login-form">
+        <input id="loginUser" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="ชื่อผู้ใช้" required>
+        <input id="loginPass" name="password" type="password" autocomplete="current-password" placeholder="รหัสผ่าน" required>
+        <button id="btnLogin" class="btn btn-primary btn-big" type="submit">เข้าสู่ระบบ</button>
+        <p id="loginErr" class="small err-text"></p>
+      </form>
+      <p class="small muted">ใส่ครั้งเดียว ให้เบราว์เซอร์จำรหัสผ่านไว้ แล้วครั้งต่อไปเปิดลิงก์ก็เข้าได้เลย (ประมาณ 30 วัน)</p>
     </div>
-    <h2 class="small-h" id="openPkgTitle">เปิดแพ็กเกจภาพ</h2>
-    <p class="small">เลือก <b>ทุกไฟล์</b> ในโฟลเดอร์แพ็กเกจ (รวม <code>manifest.json</code>)</p>
-    <div class="row">
-      <label class="btn btn-primary btn-big file-btn" id="filesLabel">
-        เลือกไฟล์ทั้งหมด
-        <input type="file" id="inputFiles" multiple hidden>
-      </label>
-      <label class="btn btn-big file-btn" id="folderLabel">
-        เลือกทั้งโฟลเดอร์
-        <input type="file" id="inputFolder" webkitdirectory multiple hidden>
-      </label>
-      <label class="btn btn-big file-btn" id="backupLabel">
-        นำเข้าไฟล์สำรอง
-        <input type="file" class="inputBackup" accept=".json,application/json" hidden>
-      </label>
-    </div>
-    <p class="muted small" id="ipadHint">บน iPad: กด "เลือกไฟล์ทั้งหมด" → "เรียกดู/Files" (ไม่ใช่คลังรูปภาพ) → เข้าโฟลเดอร์แพ็กเกจ → "เลือก" → "เลือกทั้งหมด" → "เปิด"</p>
     <p class="tip"><b>คำแนะนำ:</b> เลือกจุดที่ชัดและไม่เปลี่ยนรูปตามมุมถ่าย เช่น ขอบรูกระดูก ปลายสกรู มุมแผ่นโลหะ · กระจายให้ทั่วกรอบ · ต้องเห็นชัดทั้งสองภาพ</p>
-    <div id="loadStatus" class="status"></div>
-    <div class="row" id="startCloseRow" hidden><button id="btnStartClose" class="btn">ปิด กลับไปทำงานต่อ</button></div>
   </div>
 </div>
 
@@ -166,13 +142,11 @@
   <pre id="debugLog"></pre>
 </aside>
 
-<script src="version.js?v=0.9.0"></script>
-<script src="config.js?v=0.9.0"></script>
-<script src="viewer.js?v=0.9.0"></script>
-<script src="loader.js?v=0.9.0"></script>
-<script src="store.js?v=0.9.0"></script>
-<script src="imagestore.js?v=0.9.0"></script>
-<script src="exporter.js?v=0.9.0"></script>
-<script src="app.js?v=0.9.0"></script>
+<script src="version.js?v=1.0.0"></script>
+<script src="config.js?v=1.0.0"></script>
+<script src="viewer.js?v=1.0.0"></script>
+<script src="loader.js?v=1.0.0"></script>
+<script src="store.js?v=1.0.0"></script>
+<script src="app.js?v=1.0.0"></script>
 </body>
 </html>

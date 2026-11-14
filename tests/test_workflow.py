@@ -1,39 +1,39 @@
-"""ทดสอบขั้น 4–5 ในเบราว์เซอร์จริง (Edge ผ่าน Playwright)
+"""ทดสอบหน้ามาร์กจุดในเบราว์เซอร์จริง (Edge ผ่าน Playwright) กับเซิร์ฟเวอร์จริง (ข้อมูลชั่วคราว ภาพทดสอบ)
 
-รัน:  .venv\\Scripts\\python tests/test_workflow.py        (เพิ่ม --headed เพื่อดูหน้าจอ)
+รัน:  .venv\\Scripts\\python tests/test_workflow.py        (เพิ่ม --headed เพื่อดูหน้าจอ · --only ชื่อ เพื่อรันบางกลุ่ม)
 
 กลุ่ม
   X  กรอบ: เปิดงานแล้วเอกซเรย์ซูมพอดีกรอบ (+15%), ปุ่ม ดูทั้งภาพ / กลับไปที่กรอบ, เปิด/ปิดกรอบ
   E  งานสมจริง T006: วางผ่านแว่นขยายในมุมมองเริ่มต้น (พอดีกรอบ) ทั้ง 4 คู่ คลาด ≤ 1 px
-  N  ถัดไป/มาร์กไม่ได้/บันทึก 3 คู่ พร้อมเหตุผล, จุดไม่มีคู่
-  Q  เตือนจุดเกือบแนวเดียวกัน / กระจุกตัว (เอกซเรย์เทียบกรอบ)
-  T  จับเวลา · P ปรับภาพ (กลับสี) ไม่กระทบพิกัด
-  D  ข้อมูลห้ามหาย: บันทึกอัตโนมัติ, ปิดแท็บแล้วเปิดใหม่, หน้าแรกแสดงสถานะ, ส่งออก CSV/JSON,
-     นำเข้าอีกเครื่อง, ลบ IndexedDB แล้วนำเข้า (ตรงทุกค่า), รวม/แทนที่, สำรอง (บังคับตอนจบงาน + เตือนงานรอบก่อนที่ยังไม่สำรอง),
-     จบงาน, โหมดส่วนตัว (จำลอง) ต้องห้ามเริ่มงาน
-  C  ไม่มีคำขอเครือข่ายออกนอกเครื่อง / ไม่มี error ในหน้า
+  N  ถัดไป/มาร์กไม่ได้/บันทึก 3 คู่ พร้อมเหตุผล, จุดไม่มีคู่ · Q เตือนจุดกระจุก/แนวเดียวกัน · T จับเวลา · P กลับสีไม่กระทบพิกัด
+  S  เซิร์ฟเวอร์: เข้าสู่ระบบ, บันทึกทุกครั้งที่วาง, เปิดใหม่/อีกเครื่องเห็นงานเดิม, บัญชีทีม/ยังไม่กำหนดแพ็กเกจ
+  O  เน็ตหลุด: คิวรอส่งในเครื่อง, ส่งเองเมื่อเน็ตกลับ, ปิดเว็บไปก่อนก็ไม่หาย, โหลดภาพไม่ได้ให้ลองใหม่, พักงานตอนเน็ตหลุด
+  M  สองเครื่องบันทึกงานเดียวกัน, หมดเวลาเข้าสู่ระบบระหว่างทำ, พักงาน/ออกจากระบบ
+  K  ข้ามไปก่อน + ไปที่งาน · U อัปเดตเวอร์ชันเอง · Mac แทร็กแพด · เก็บคิวในเครื่องไม่ได้ (โหมดส่วนตัว)
+  C  ไม่มีคำขอเครือข่ายนอกเซิร์ฟเวอร์ของโครงการ / ไม่มี error ในหน้า
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
-import io
 import json
 import math
 import re
-import shutil
 import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_coordinates import (GEN, ERR_INIT, Input, Results, goto_task, marks, open_package,  # noqa: E402
-                              package_files, place, start_server, to_page, view, wait_loaded)
+import test_coordinates as TC  # noqa: E402
+from test_coordinates import (GEN, ERR_INIT, Input, Results, goto_task, marks, place,  # noqa: E402
+                              start_server, to_page, view, wait_loaded)
 
-DL = GEN / "_downloads"
 PKG = "test_package"
+
+
+def server():
+    return TC.SERVER
 
 
 class Env:
@@ -50,10 +50,7 @@ class Env:
         return c
 
     def page(self, c):
-        p = c.new_page()
-        p.goto(f"{self.base}/marker/index.html")
-        p.wait_for_selector("body[data-ready='1']")
-        return p
+        return c.new_page()
 
 
 def manifest(pkg=PKG):
@@ -64,13 +61,15 @@ def targets(pkg=PKG):
     return json.loads((GEN / pkg / "targets.json").read_text(encoding="utf-8"))["targets"]
 
 
-def open_pkg(page, pkg=PKG):
-    open_package(page, None, package_files(pkg), goto=False)
+def open_pkg(page, pkg=PKG, user=None):
+    """เข้าสู่ระบบ (บัญชีใหม่ งานว่าง ถ้าไม่ระบุ) แล้วเปิดแพ็กเกจจากเซิร์ฟเวอร์ · คืน (ชื่อ, รหัส)"""
+    u = server().open(page, pkg, user)
     wait_loaded(page)
+    return u
 
 
 def wait_dialog(page):
-    page.wait_for_selector("#dialog:not([hidden])", timeout=5000)
+    page.wait_for_selector("#dialog:not([hidden])", timeout=8000)
     return page.text_content("#dialogTitle") or ""
 
 
@@ -84,20 +83,6 @@ def choose_reason(page, code, text=None):
 
 def flush(page):
     page.evaluate("() => window.__marker.flushSave()")
-
-
-def idb_record(page, pkg):
-    return page.evaluate("(id) => window.Store.get(id)", pkg)
-
-
-def download(page, selector, name):
-    with page.expect_download() as d:
-        page.click(selector)
-    dl = d.value
-    DL.mkdir(parents=True, exist_ok=True)
-    path = DL / f"{name}_{dl.suggested_filename}"
-    dl.save_as(str(path))
-    return dl.suggested_filename, path
 
 
 def place_pairs(page, inp, pairs):
@@ -269,535 +254,230 @@ def check_page_errors(p, res, label):
     res.check(not errs, f"C ไม่มี error ในหน้า ({label})", str(errs[:3]))
 
 
-# ---------------------------------------------------------------- D
 def tasks_equal(a, b):
     return json.dumps(a, sort_keys=True, ensure_ascii=False) == json.dumps(b, sort_keys=True, ensure_ascii=False)
 
 
-def test_data_safety(env: Env):
+
+# ---------------------------------------------------------------- S: เซิร์ฟเวอร์ (เข้าสู่ระบบ บันทึก เปิดใหม่ อีกเครื่อง)
+def wait_saved(p, timeout=10000):
+    p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึกแล้ว')", timeout=timeout)
+
+
+def test_server_save(env: Env):
     res = env.res
-    m = manifest()
+    S = server()
     t = targets()
+    user = S.add_user([PKG])
     c = env.ctx()
-    p = env.page(c)
-    res.check(p.is_visible("#noDataBox"), "D เครื่องใหม่: แสดงปุ่ม นำเข้าไฟล์สำรอง ชัดเจน", "")
-    open_pkg(p)
+    p = c.new_page()
+    p.goto(S.url(PKG))
+    p.wait_for_selector("#loginCard:not([hidden])")
+    p.fill("#loginUser", user[0])
+    p.fill("#loginPass", "wrong-password")
+    p.click("#btnLogin")
+    p.wait_for_function("() => (document.getElementById('loginErr').textContent || '').length > 0")
+    err = p.text_content("#loginErr") or ""
+    p.fill("#loginPass", user[1])
+    p.click("#btnLogin")
+    wait_loaded(p)
+    res.check("ไม่ถูกต้อง" in err and p.is_hidden("#startScreen"), "S เข้าสู่ระบบ: รหัสผิดแจ้งชัด · รหัสถูกเปิดงานได้เลย ไม่ต้องเลือกไฟล์", err)
+    res.check(p.locator("#inputFiles").count() == 0 and p.locator("#btnExport").count() == 0 and p.locator("#btnOpen").count() == 0,
+              "S ไม่มีปุ่มเลือกไฟล์ / ส่งออก / หน้าแรก ฝั่งหมอ", "")
+
     show_whole(p)
     inp = Input(p, c, "mouse")
-    place_pairs(p, inp, list(zip(t["T001_X.png"][:4], t["T001_F.jpg"][:4])))
-    p.click("#btnNext")
-    p.wait_for_function("() => window.__marker.state.index === 1 && window.__marker.viewers.xray.img")
-    show_whole(p)
-    place_pairs(p, inp, list(zip(t["T002_X.jpg"][:2], t["T002_F.jpg"][:2])))
-    # หมายเหตุต่องาน (ไม่บังคับ): ข้อความมี # , ขึ้นบรรทัดใหม่ ต้องไม่ทำให้ CSV เพี้ยน
-    st_before = p.evaluate("() => window.__marker.task().status")
+    place_pairs(p, inp, list(zip(t["T001_X.png"][:2], t["T001_F.jpg"][:2])))
+    wait_saved(p)
+    rev, row = S.task_row(user[0], PKG, "T001")
+    u, v = t["T001_X.png"][1]
+    res.check(row and row["xray"][1] and abs(row["xray"][1]["x"] - u) <= 1 and abs(row["fluoro"][1]["y"] - t["T001_F.jpg"][1][1]) <= 1
+              and rev >= 2, "S วางจุดแล้วบันทึกขึ้นเซิร์ฟเวอร์ทันที (ทุกครั้งที่วาง)", f"rev={rev} {row and row['xray'][:2]}")
+
+    # หมายเหตุ + ไปงานที่ 3 แล้วเปิดใหม่ -> กลับมางานเดิม จุดและหมายเหตุอยู่ครบ (จากเซิร์ฟเวอร์)
     p.click("#btnNote")
     wait_dialog(p)
-    p.fill("#noteInput", "จุด 2 ไม่แน่ใจ # ทดสอบ, \"อ้าง\"\nบรรทัดสอง")
+    p.fill("#noteInput", "จุด 2 ไม่แน่ใจ")
     p.click("#btnNoteOk")
-    p.wait_for_timeout(100)
-    tn = p.evaluate("() => window.__marker.task()")
-    res.check(tn["note"] == 'จุด 2 ไม่แน่ใจ # ทดสอบ, "อ้าง" บรรทัดสอง' and tn["status"] == st_before
-              and "✓" in (p.text_content("#btnNote") or ""),
-              "D หมายเหตุต่องาน: บันทึกได้ ไม่เปลี่ยนสถานะ ปุ่มแสดง ✓", f"{tn['note']!r} {st_before}->{tn['status']}")
+    goto_task(p, 2)
     flush(p)
-    rec = idb_record(p, m["package_id"])
-    res.check(rec and rec["tasks"]["T001"]["status"] == "done" and rec["tasks"]["T002"]["fluoro"][1] is not None,
-              "D บันทึกอัตโนมัติลง IndexedDB ทุกการเปลี่ยนแปลง", f"T001={rec and rec['tasks']['T001']['status']}")
-    snapshot = p.evaluate("() => JSON.parse(JSON.stringify(window.__marker.state.tasks))")
+    p.reload()
+    wait_loaded(p)
+    st = p.evaluate("() => window.__marker.state")
+    res.check(st["index"] == 2 and st["tasks"]["T001"]["xray"][1] is not None and st["tasks"]["T001"]["note"] == "จุด 2 ไม่แน่ใจ"
+              and p.is_hidden("#startScreen"), "S เปิดใหม่ (ปิดแท็บ/รีเฟรช): ไม่ต้องใส่รหัสซ้ำ กลับงานเดิม จุดและหมายเหตุครบ", st["index"])
 
-    # ปิดแท็บแล้วเปิดใหม่
-    p.close()
-    p = env.page(c)
-    item = p.text_content("#savedList") or ""
-    res.check(m["package_id"] in item and "ทำแล้ว 1/" in item and "บันทึกล่าสุด" in item and "ยังไม่เคยสำรอง" in item,
-              "D หน้าแรกแสดง: บันทึกล่าสุด / ทำแล้ว / สำรองล่าสุด", item.replace("\n", " "))
-    open_pkg(p)
-    restored = p.evaluate("() => JSON.parse(JSON.stringify(window.__marker.state.tasks))")
-    same_points = all(tasks_equal(restored[k]["xray"], snapshot[k]["xray"]) and tasks_equal(restored[k]["fluoro"], snapshot[k]["fluoro"])
-                      and restored[k]["status"] == snapshot[k]["status"] for k in snapshot)
-    res.check(same_points and p.evaluate("() => window.__marker.state.index") == 1,
-              "D ปิดแท็บกลางงานแล้วเปิดใหม่ ข้อมูลอยู่ครบ + กลับไปงานเดิม", "")
-
-    # ส่งออก JSON + CSV
-    p.click("#btnExport")
-    wait_dialog(p)
-    jname, jpath = download(p, "#btnDlJson", "export1")
-    cname, cpath = download(p, "#btnDlCsv", "export1")
-    p.click("#btnExportClose")
-    total = len(m["items"])
-    res.check(re.fullmatch(rf"marks_{m['package_id']}_\d{{8}}-\d{{6}}_1of{total}\.json", jname) is not None,
-              "D ชื่อไฟล์สำรองมีวันที่ เวลา และจำนวนงานที่ทำแล้ว", jname)
-    data = json.loads(jpath.read_text(encoding="utf-8"))
-    res.check(data["format"] == "pelnav-marks" and "COCO" in data["coord_convention"] and data["package_id"] == m["package_id"],
-              "D ไฟล์ JSON มีรูปแบบและมาตรฐานพิกัด", data.get("coord_convention", "")[:60])
-    check_csv(res, cpath, data, m)
-    rec = idb_record(p, m["package_id"])
-    res.check(rec["last_backup_at"] is not None, "D บันทึกเวลาสำรองล่าสุด", str(rec["last_backup_at"]))
-
-    # นำเข้าบนอีกเครื่อง (context ใหม่ = เครื่องใหม่)
-    c2 = env.ctx()
-    p2 = env.page(c2)
-    p2.set_input_files("#noDataBox .inputBackup", str(jpath))
-    wait_dialog(p2)
-    p2.click("#btnImportReplace")
-    p2.wait_for_function("(id) => window.Store.get(id).then(r => !!r)", arg=m["package_id"])
-    r2 = idb_record(p2, m["package_id"])
-    res.check(tasks_equal(r2["tasks"], data["tasks"]), "D ส่งออก → นำเข้าอีกเครื่อง ข้อมูลตรงทุกค่า", "")
-    open_pkg(p2)
-    res.check(p2.evaluate("() => window.__marker.state.tasks['T001'].status") == "done", "D เปิดแพ็กเกจหลังนำเข้า ทำต่อได้", "")
+    # อีกเครื่อง (context ใหม่ = iPad อีกเครื่อง) บัญชีเดียวกัน -> เห็นงานเดียวกัน
+    c2 = env.ctx({"width": 1180, "height": 820})
+    p2 = c2.new_page()
+    S.open(p2, PKG, user)
+    wait_loaded(p2)
+    t2 = p2.evaluate("() => window.__marker.state.tasks['T001']")
+    res.check(tasks_equal(t2["xray"], st["tasks"]["T001"]["xray"]) and p2.evaluate("() => window.__marker.state.index") == 2,
+              "S เปิดจากอีกเครื่องด้วยบัญชีเดียวกัน → เห็นงานและตำแหน่งงานเดียวกัน", "")
     c2.close()
 
-    # ลบ IndexedDB ทิ้ง -> นำเข้า -> ตรงทุกค่า (acceptance test 8)
-    p.evaluate("() => new Promise((ok, bad) => { const r = indexedDB.deleteDatabase('pelnav-marker'); r.onsuccess = ok; r.onerror = bad; r.onblocked = () => ok(); })")
-    p.reload()
-    p.wait_for_selector("body[data-ready='1']")
-    empty = p.is_visible("#noDataBox")
-    p.set_input_files("#noDataBox .inputBackup", str(jpath))
-    wait_dialog(p)
-    p.click("#btnImportReplace")
-    p.wait_for_function("(id) => window.Store.get(id).then(r => !!r)", arg=m["package_id"])
-    r3 = idb_record(p, m["package_id"])
-    res.check(empty and tasks_equal(r3["tasks"], data["tasks"]), "D ลบ IndexedDB → นำเข้าไฟล์สำรอง → ข้อมูลกลับมาครบตรงทุกค่า",
-              f"หน้าแรกว่าง={empty}")
-
-    # รวม / แทนที่: แก้งานในเครื่องหลังส่งออก แล้วนำเข้าไฟล์เก่า
-    open_pkg(p)
-    goto_task(p, 2)
-    show_whole(p)
-    inp = Input(p, c, "mouse")
-    place(p, inp, "xray", *t["T003_X.png"][0])
-    goto_task(p, 1)
-    show_whole(p)
-    place(p, inp, "xray", *t["T002_X.jpg"][2])                 # T002 ในเครื่องใหม่กว่าไฟล์
-    flush(p)
-    local_t2 = p.evaluate("() => JSON.parse(JSON.stringify(window.__marker.state.tasks['T002']))")
-    p.click("#btnOpen")
-    p.set_input_files("#backupLabel .inputBackup", str(jpath))
-    title = wait_dialog(p)
-    body = p.text_content("#dialogBody") or ""
-    p.click("#btnImportMerge")
-    p.wait_for_timeout(300)
-    r4 = idb_record(p, m["package_id"])
-    # T001: จุดเหมือนไฟล์ (เวลาที่ใช้ในเครื่องอาจเพิ่มหลังส่งออก -> ถือว่าในเครื่องใหม่กว่า/เท่ากัน ก็ยึดในเครื่อง)
-    t1_same_points = tasks_equal(r4["tasks"]["T001"]["xray"], data["tasks"]["T001"]["xray"]) and \
-        tasks_equal(r4["tasks"]["T001"]["fluoro"], data["tasks"]["T001"]["fluoro"])
-    res.check("มีข้อมูลในเครื่องอยู่แล้ว" in title and "คงของในเครื่องที่ใหม่กว่า" in body and tasks_equal(r4["tasks"]["T002"], local_t2)
-              and "T003" in r4["tasks"] and t1_same_points,
-              "D นำเข้าแบบ รวม: แสดงสรุปก่อนยืนยัน + ยึดงานที่แก้ล่าสุด", body[:200])
-    p.set_input_files("#backupLabel .inputBackup", str(jpath))      # หน้าแรกยังเปิดอยู่
-    wait_dialog(p)
-    p.click("#btnImportReplace")
-    p.wait_for_timeout(300)
-    r5 = idb_record(p, m["package_id"])
-    snaps = p.evaluate("() => new Promise(ok => { const r = indexedDB.open('pelnav-marker'); r.onsuccess = () => { const q = r.result.transaction('snapshots').objectStore('snapshots').count(); q.onsuccess = () => ok(q.result); }; })")
-    res.check(tasks_equal(r5["tasks"], data["tasks"]) and snaps >= 2, "D นำเข้าแบบ แทนที่ = ตรงกับไฟล์ + เก็บสำเนาก่อนนำเข้า",
-              f"snapshots={snaps}")
-    check_page_errors(p, res, "หน้าทดสอบข้อมูล")
+    # บัญชีทีม / แพทย์ที่ยังไม่ได้กำหนดแพ็กเกจ
+    for role, pk, expect, label in (("team", [PKG], "ทีมวิจัย", "บัญชีทีมเปิดหน้ามาร์ก → บอกให้ใช้หน้าทีม"),
+                                    ("doctor", [], "ติดต่อทีม", "แพทย์ที่ยังไม่ได้กำหนดแพ็กเกจ → บอกให้ติดต่อทีม")):
+        cu = env.ctx()
+        pu = cu.new_page()
+        uu = S.add_user(pk, role=role)
+        S.login(cu, *uu)
+        pu.goto(S.url())
+        pu.wait_for_function("(e) => (document.getElementById('startMsg').textContent || '').includes(e)", arg=expect, timeout=8000)
+        msg = pu.text_content("#startMsg") or ""
+        res.check(expect in msg, f"S {label}", msg)
+        cu.close()
+    check_page_errors(p, res, "หน้าทดสอบเซิร์ฟเวอร์")
     c.close()
 
 
-def check_csv(res, path, data, m):
-    raw = path.read_bytes()
-    text = raw.decode("utf-8-sig")
-    lines = text.splitlines()
-    meta = [l for l in lines if l.startswith("#")]
-    body = "\n".join(l for l in lines if not l.startswith("#"))
-    rows = list(csv.DictReader(io.StringIO(body)))
-    res.check(raw.startswith(b"\xef\xbb\xbf") and any("coord_convention" in l and "COCO" in l for l in meta)
-              and any("subtract 0.5" in l for l in meta), "D CSV: หัวไฟล์ระบุมาตรฐานพิกัด COCO", meta[4][:80] if len(meta) > 4 else str(meta))
-    cols = rows[0].keys() if rows else []
-    need = {"note", "task_id", "point_id", "xray_x", "xray_y", "fluoro_x", "fluoro_y", "status", "reason", "started_at",
-            "finished_at", "duration_s", "app_version", "package_id", "xray_image_px_per_screen_px", "fluoro_image_px_per_screen_px"}
-    res.check(need <= set(cols), "D CSV: มีคอลัมน์ครบตามสเปก + image_px_per_screen_px", str(sorted(set(need) - set(cols))))
-    exp = []
-    for it in m["items"]:
-        tk = data["tasks"].get(it["task_id"])
-        if not tk or (tk["status"] == "todo" and not tk.get("note")):
-            continue
-        pairs = [i for i in range(4) if tk["xray"][i] and tk["fluoro"][i]]
-        exp += [(it["task_id"], str(i + 1)) for i in pairs] or [(it["task_id"], "")]
-    got = [(r["task_id"], r["point_id"]) for r in rows]
-    vals_ok = True
-    for r in rows:
-        if not r["point_id"]:
-            continue
-        tk = data["tasks"][r["task_id"]]
-        i = int(r["point_id"]) - 1
-        vals_ok &= r["xray_x"] == f"{tk['xray'][i]['x']:.1f}" and r["fluoro_y"] == f"{tk['fluoro'][i]['y']:.1f}"
-        vals_ok &= float(r["xray_image_px_per_screen_px"]) <= 0.5
-    for r in rows:
-        note = data["tasks"][r["task_id"]].get("note") or ""
-        vals_ok &= r["note"] == note.replace("#", "＃")
-    res.check(got == exp and vals_ok, "D CSV: แถวและค่าตรงกับข้อมูล (ทศนิยม 1 ตำแหน่ง) + หมายเหตุ", f"ได้ {got} ควร {exp}")
-    res.check(any(r["note"] for r in rows), "D CSV: มีคอลัมน์หมายเหตุและค่าตรงกับ JSON", str([r["note"] for r in rows]))
+# ---------------------------------------------------------------- O: เน็ตหลุด
+def outbox(p, user, pkg_id):
+    return p.evaluate("(k) => window.Store.get(k).then(r => r ? Object.keys(r.tasks) : [])", f"outbox:{user}:{pkg_id}")
 
 
-def test_forced_backup(env: Env):
-    """v0.9.0: ไม่บังคับสำรองระหว่างทำ · บังคับเฉพาะตอนกด จบงาน (ไม่มีเลื่อน) · ปิดเว็บโดยไม่กดจบงาน
-    → เปิดครั้งหน้ามีกรอบเตือน + ปุ่ม สำรองทันที"""
+def test_offline(env: Env):
     res = env.res
-    pkg = "test_package_big"
-    pid = manifest(pkg)["package_id"]
+    S = server()
+    t = targets()
+    pid = S.pkg_ids[PKG]
     c = env.ctx()
-    p = env.page(c)
-    open_pkg(p, pkg)
-    for i in range(10):
-        p.click("#btnUnmarkable")
-        choose_reason(p, "unclear")
-        p.wait_for_function(f"() => window.__marker.state.index === {i + 1} && window.__marker.state.imagesReady")
-    res.check(p.is_hidden("#dialog") and p.evaluate("() => window.__marker.state.index") == 10,
-              "D ทำครบ 10 งาน → ไม่มีหน้าต่างบังคับสำรองระหว่างทำ", "")
+    p = c.new_page()
+    user = S.open(p, PKG)
+    wait_loaded(p)
+    show_whole(p)
+    inp = Input(p, c, "mouse")
+    xt, ft = t["T001_X.png"], t["T001_F.jpg"]
+    place_pairs(p, inp, [(xt[0], ft[0])])
+    wait_saved(p)
 
-    # ปิดเว็บโดยไม่กดจบงาน -> เปิดครั้งหน้า: กรอบเตือน + ปุ่ม สำรองทันที (ดาวน์โหลดได้ทันที ไม่ต้องเปิดงาน)
-    flush(p)
+    # เน็ตหลุด -> วางต่อได้ แถบบนบอกว่ายังไม่ได้ส่ง และคิวเก็บในเครื่อง
+    c.set_offline(True)
+    place_pairs(p, inp, [(xt[1], ft[1])])
+    p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').includes('ยังไม่ได้ส่ง')", timeout=10000)
+    lbl = p.text_content("#saveLabel") or ""
+    ob = outbox(p, user[0], pid)
+    srv_before = S.task_row(user[0], PKG, "T001")[1]
+    res.check("ยังไม่ได้ส่ง 1 งาน" in lbl and ob == ["T001"] and srv_before["xray"][1] is None,
+              "O เน็ตหลุด: วางจุดต่อได้ · แถบบนบอก ยังไม่ได้ส่ง · เก็บคิวไว้ในเครื่อง", f"{lbl} · คิว={ob}")
+    # เน็ตกลับมา -> ส่งเอง
+    c.set_offline(False)
+    p.evaluate("() => window.dispatchEvent(new Event('online'))")
+    wait_saved(p, 15000)
+    srv_after = S.task_row(user[0], PKG, "T001")[1]
+    res.check(srv_after["xray"][1] is not None and outbox(p, user[0], pid) == [],
+              "O เน็ตกลับมา → ส่งงานที่ค้างขึ้นเซิร์ฟเวอร์เอง แล้วล้างคิวในเครื่อง", "")
+
+    # เน็ตหลุดแล้วปิดเว็บไปเลย -> เปิดใหม่ตอนเน็ตกลับมา ส่งเอง
+    c.set_offline(True)
+    place_pairs(p, inp, [(xt[2], ft[2])])
+    p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').includes('ยังไม่ได้ส่ง')", timeout=10000)
     p.close()
-    p = env.page(c)
-    p.wait_for_selector("#backupReminder:not([hidden])", timeout=5000)
-    box = p.text_content("#backupReminder") or ""
-    name, path = download(p, "#btnBackupNow", "reminder")
-    data = json.loads(path.read_text(encoding="utf-8"))
-    p.wait_for_selector("#backupReminder", state="hidden", timeout=5000)
-    rec = idb_record(p, pid)
-    res.check("ยังไม่ได้สำรองงานรอบก่อน" in box and pid in box and name.endswith("_10of12.json")
-              and Exporter_count(data) == 10 and rec["last_backup_at"] is not None,
-              "D ปิดเว็บโดยไม่กดจบงาน → เปิดครั้งหน้าเตือน + ปุ่ม สำรองทันที (ได้ไฟล์ครบ 10 งาน แล้วกรอบหายไป)", box[:90])
-    p.close()
-    p = env.page(c)
-    p.wait_for_timeout(300)
-    res.check(p.is_hidden("#backupReminder"), "D สำรองแล้ว → เปิดครั้งหน้าไม่เตือนซ้ำ", "")
+    c.set_offline(False)
+    p = c.new_page()
+    p.goto(S.url(PKG))
+    wait_loaded(p)
+    p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึกแล้ว')", timeout=15000)
+    srv3 = S.task_row(user[0], PKG, "T001")[1]
+    res.check(srv3["xray"][2] is not None and p.evaluate("() => window.__marker.state.tasks['T001'].xray[2]") is not None,
+              "O เน็ตหลุดแล้วปิดเว็บ → เปิดใหม่ งานที่ค้างถูกส่งขึ้นเซิร์ฟเวอร์ ไม่หาย", "")
 
-    # งานที่แก้ในรอบนี้ไม่ทำให้กรอบเตือนขึ้น (จะสำรองตอนกดจบงาน)
-    open_pkg(p, pkg)
-    p.click("#btnUnmarkable")
-    choose_reason(p, "unclear")
-    p.wait_for_function("() => window.__marker.state.index === 11 && window.__marker.state.imagesReady")
-    p.click("#btnOpen")
-    p.wait_for_timeout(300)
-    res.check(p.is_hidden("#backupReminder"), "D งานที่แก้ในรอบนี้ ไม่ขึ้นกรอบเตือนรอบก่อน", "")
-    p.click("#btnStartClose")
+    # โหลดภาพไม่ได้ตอนเน็ตหลุด -> ข้อความชัด + ลองใหม่ได้
+    c.set_offline(True)
+    p.evaluate("() => { window.__marker.showTask(4); }")
+    title = wait_dialog(p)
+    c.set_offline(False)
+    p.click("#btnImgRetry")
+    p.wait_for_function("() => window.__marker.state.index === 4 && window.__marker.state.imagesReady", timeout=15000)
+    res.check("โหลดภาพไม่ได้" in title, "O โหลดภาพไม่ได้ (เน็ตหลุด) → บอกชัด + กด ลองใหม่ ได้", title)
 
-    # จบงาน -> บังคับสำรอง (ไม่มีปุ่มเลื่อน ไม่มีปุ่มปิด) แล้วกลับหน้าแรก
+    # พักงานขณะยังส่งไม่ได้ -> บอกว่างานเก็บในเครื่อง ยังส่งไม่ครบ
+    c.set_offline(True)
+    p.evaluate("() => { const t = window.__marker.task(); t.note = 'ตอนเน็ตหลุด'; t.updated_at = new Date().toISOString(); window.__marker.save(); }")
     p.click("#btnFinish")
-    title = wait_dialog(p)
-    no_escape = not p.is_visible("#btnSnooze") and not p.is_visible("#btnExportClose")
-    name2, _ = download(p, "#btnDlJson", "finish")
-    p.wait_for_selector("#startScreen:not([hidden])")
-    p.wait_for_function("() => !document.getElementById('savedList').textContent.includes('ยังไม่เคยสำรอง')")
-    saved = p.text_content("#savedList") or ""
-    res.check("สำรอง" in title and no_escape and name2.endswith("_11of12.json") and "สำรองล่าสุด" in saved,
-              "D กดจบงาน → บังคับสำรอง (เลื่อนไม่ได้) → กลับหน้าแรกพร้อมสถานะ", " ".join(saved.split())[:150])
-    check_page_errors(p, res, "หน้าทดสอบสำรอง")
-    c.close()
-
-
-def Exporter_count(data):
-    return sum(1 for t in data["tasks"].values() if t["status"] in ("done", "partial", "unmarkable"))
-
-
-FAKE_LOST_FILES = """() => {
-  // จำลอง iPad ปล่อยไฟล์ที่เลือกไว้: อ่านแล้วได้ NotReadableError เหมือนบน iOS
-  const st = window.__marker.state;
-  const fake = (n) => ({ name: n, size: 10, slice: () => ({ arrayBuffer: () =>
-      Promise.reject(new DOMException('The I/O read operation failed.', 'NotReadableError')) }) });
-  for (const k of [...st.byName.keys()]) st.byName.set(k, fake(k));
-}"""
-
-
-def repick(p):
-    """กดปุ่ม 'เลือกไฟล์แพ็กเกจอีกครั้ง' -> ต้องสั่งเปิดตัวเลือกไฟล์ (#inputFiles.click) แล้วใส่ไฟล์เข้าไป
-    (ไม่ใช้ expect_file_chooser เพราะทำให้ Playwright ค้างตอนปิด)"""
-    p.evaluate("""() => { window.__picked = 0; const o = HTMLInputElement.prototype.click;
-        HTMLInputElement.prototype.click = function () { if (this.id === 'inputFiles') window.__picked++; }; }""")
-    p.click("#btnRepick")
-    assert p.evaluate("() => window.__picked") == 1, "ปุ่มไม่ได้เปิดตัวเลือกไฟล์"
-    p.set_input_files("#inputFiles", package_files(PKG))
-
-
-def test_ios_resilience(env: Env):
-    """ปัญหาที่เจอบน iPad จริง (iPadOS 26.4): การเชื่อมต่อ IndexedDB ถูกตัด, บันทึกล้มเหลวชั่วคราว,
-    iPad ปล่อยไฟล์ภาพหลังดาวน์โหลด, 'Script error.' จากนอกเว็บ"""
-    res = env.res
-    m = manifest()
-    t = targets()
-    c = env.ctx(init=NO_LOCAL_IMAGES)        # ทดสอบโหมดอ่านจากไฟล์ที่เลือก (กรณีเก็บภาพในเครื่องไม่ได้)
-    p = env.page(c)
-    open_pkg(p)
-    show_whole(p)
-    inp = Input(p, c, "mouse")
-    place_pairs(p, inp, [(t["T001_X.png"][0], t["T001_F.jpg"][0])])
-    flush(p)
-
-    # 1) การเชื่อมต่อฐานข้อมูลถูกปิด (เหมือน iOS ตัดตอนแอปถูกพัก) -> ต้องเปิดใหม่และบันทึกได้เอง
-    p.evaluate("async () => { const db = await window.Store._db(); db.close(); }")
-    place_pairs(p, inp, [(t["T001_X.png"][1], t["T001_F.jpg"][1])])
-    flush(p)
-    rec = idb_record(p, m["package_id"])
-    label = p.text_content("#saveLabel") or ""
-    res.check(rec["tasks"]["T001"]["xray"][1] is not None and "ไม่สำเร็จ" not in label,
-              "I การเชื่อมต่อฐานข้อมูลถูกตัด → เปิดใหม่และบันทึกได้เอง", label)
-
-    # 2) บันทึกล้มเหลวหลายครั้ง (error = null แบบ Safari) -> ลองใหม่เอง แล้วข้อมูลครบเมื่อกลับมาใช้ได้
-    p.evaluate("""() => { window.__realPut = window.Store.put; let n = 0;
-        window.Store.put = (r) => (n++ < 3 ? Promise.reject(null) : window.__realPut(r)); }""")
-    place_pairs(p, inp, [(t["T001_X.png"][2], t["T001_F.jpg"][2])])
-    p.wait_for_timeout(300)
-    mid = p.text_content("#saveLabel") or ""
-    log_ok = p.evaluate("() => window.__marker.Debug.entries().some(e => e.msg.includes('บันทึกไม่สำเร็จ') && !e.msg.endsWith('null'))")
-    p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึก ')", timeout=15000)
-    p.evaluate("() => { window.Store.put = window.__realPut; }")
-    flush(p)
-    rec = idb_record(p, m["package_id"])
-    res.check(rec["tasks"]["T001"]["xray"][2] is not None and rec["tasks"]["T001"]["fluoro"][2] is not None and log_ok,
-              "I บันทึกล้มเหลวชั่วคราว → ลองใหม่เอง ข้อมูลครบ (log ไม่ใช่ 'null')", f"ระหว่างล้ม: '{mid}'")
-
-    # 3) iPad ปล่อยไฟล์ภาพ ตอนไปงานถัดไป -> ข้อความชัด + เลือกไฟล์ใหม่ แล้วกลับมางานเดิม จุดไม่หาย
-    p.evaluate(FAKE_LOST_FILES)
-    # ไม่ await: showTask จะรอจนกว่าจะกดปุ่มในหน้าต่าง (ถ้า await ตรงนี้ Playwright จะค้าง)
-    p.evaluate("() => { window.__marker.showTask(1); }")
-    title = wait_dialog(p)
+    t_pause = wait_dialog(p)
     body = p.text_content("#dialogBody") or ""
-    repick(p)
-    p.wait_for_function("() => window.__marker.state.index === 1 && window.__marker.viewers.xray.img && window.__marker.state.imagesReady")
-    kept = p.evaluate("() => window.__marker.state.tasks['T001'].xray.filter(Boolean).length")
-    res.check("เลือกไฟล์แพ็กเกจอีกครั้ง" in title and "ไม่หาย" in body and kept == 3,
-              "I iPad ปล่อยไฟล์ภาพ → บอกให้เลือกไฟล์ใหม่ → กลับมางานเดิม จุดอยู่ครบ", f"{title} · จุด T001 = {kept}")
-
-    # 4) ปล่อยไฟล์ระหว่างไปหน้าดาวน์โหลด -> กลับมาที่เว็บ (focus) ต้องเตือนทันที
-    p.evaluate(FAKE_LOST_FILES)
-    p.evaluate("() => window.dispatchEvent(new Event('focus'))")
-    title2 = wait_dialog(p)
-    repick(p)
-    p.wait_for_function("() => window.__marker.state.imagesReady")
-    res.check("เลือกไฟล์แพ็กเกจอีกครั้ง" in title2, "I กลับมาที่เว็บหลังดาวน์โหลด → ตรวจไฟล์และเตือนทันที", title2)
-    check_page_errors(p, res, "หน้าทดสอบ iPad")
-
-    # 5) 'Script error.' จากนอกเว็บ -> บันทึกเป็นข้อมูล ไม่ใช่ข้อผิดพลาดของเว็บ
-    p.evaluate("() => window.dispatchEvent(new ErrorEvent('error', { message: 'Script error.' }))")
-    last = p.evaluate("() => window.__marker.Debug.entries().slice(-1)[0]")
-    res.check(not last["isErr"] and "นอกเว็บ" in last["msg"], "I 'Script error.' จากนอกเว็บ ไม่นับเป็นข้อผิดพลาด", last["msg"])
+    p.click("#btnPauseStay")
+    c.set_offline(False)
+    p.evaluate("() => window.dispatchEvent(new Event('online'))")
+    wait_saved(p, 15000)
+    res.check("ยังส่งไม่ครบ" in t_pause and "ไม่หาย" in body, "O กดพักงานตอนเน็ตหลุด → บอกว่ายังส่งไม่ครบ งานเก็บในเครื่องไม่หาย", t_pause)
+    check_page_errors(p, res, "หน้าทดสอบเน็ตหลุด")
     c.close()
 
 
-NO_LOCAL_IMAGES = "window.__PELNAV_NO_LOCAL_IMAGES = true;"
-
-# แก้ฐานข้อมูลภาพในเครื่องโดยตรง (จำลองภาพหาย/เสีย)
-IMG_DB_OP = """async ([op, pkg, name]) => {
-  const db = await new Promise((ok, bad) => { const r = indexedDB.open('pelnav-images'); r.onsuccess = () => ok(r.result); r.onerror = bad; });
-  await new Promise((ok, bad) => {
-    const t = db.transaction('files', 'readwrite'), s = t.objectStore('files'), key = pkg + '/' + name;
-    if (op === 'delete') s.delete(key);
-    else s.get(key).onsuccess = (e) => { const v = e.target.result; v.blob = new Blob([new Uint8Array(v.size)], { type: v.blob.type }); s.put(v); };
-    t.oncomplete = ok; t.onerror = bad;
-  });
-  db.close();
-}"""
-DROP_IMG_DB = """() => new Promise((ok) => { window.ImageStore._close().then(() => {
-  const r = indexedDB.deleteDatabase('pelnav-images'); r.onsuccess = ok; r.onerror = ok; r.onblocked = ok; }); })"""
-# จำนวนภาพและแพ็กเกจที่เหลือในฐานข้อมูลภาพ (หลังลบ หน้าแรกอาจเปิดฐานข้อมูลเปล่าขึ้นใหม่ได้ ไม่มีภาพ)
-IMG_DB_COUNT = """() => new Promise((ok) => { const r = indexedDB.open('pelnav-images');
-  r.onupgradeneeded = () => { r.transaction.abort(); };
-  r.onerror = () => ok(0);
-  r.onsuccess = () => { const db = r.result; if (!db.objectStoreNames.contains('files')) { db.close(); ok(0); return; }
-    const t = db.transaction(['files', 'packages']); let n = 0;
-    t.objectStore('files').count().onsuccess = (e) => { n += e.target.result; };
-    t.objectStore('packages').count().onsuccess = (e) => { n += e.target.result; };
-    t.oncomplete = () => { db.close(); ok(n); }; }; })"""
-USAGE = "() => navigator.storage.estimate().then(e => e.usage)"
-
-
-def local_state(p, pkg):
-    return p.evaluate("""async (pkg) => { const r = await window.ImageStore.getRecord(pkg);
-        const n = (await window.ImageStore.storedNames(pkg)).length;
-        return { complete: !!(r && r.complete), stored: n, flag: window.ImageStore.flag(), source: window.__marker.state.source }; }""", pkg)
-
-
-def test_local_images(env: Env):
-    """แบบ A: เปิดแพ็กเกจครั้งแรกเก็บภาพในเครื่อง → ครั้งต่อไปกด ทำงานต่อ ไม่ต้องเลือกไฟล์
-    ตรวจความครบทุกครั้งที่เปิด, ภาพหาย/เสีย → ให้เลือกแพ็กเกจใหม่ จุดไม่หาย, ลบภาพ (ยืนยัน 2 ครั้ง) ไม่ลบจุด"""
+# ---------------------------------------------------------------- M: สองเครื่อง / หมดเวลาเข้าสู่ระบบ / พักงาน
+def test_multi_device(env: Env):
     res = env.res
-    m = manifest()
-    pkg = m["package_id"]
-    nfiles = 2 * len(m["items"])
+    S = server()
     t = targets()
-    c = env.ctx()
-    p = env.page(c)
-    u0 = p.evaluate(USAGE)
+    xt, ft = t["T001_X.png"], t["T001_F.jpg"]
+    user = S.add_user([PKG])
+    ca, cb = env.ctx(), env.ctx()
+    pa, pb = ca.new_page(), cb.new_page()
+    S.open(pa, PKG, user)
+    S.open(pb, PKG, user)
+    wait_loaded(pa)
+    wait_loaded(pb)
+    show_whole(pa)
+    show_whole(pb)
+    ia, ib = Input(pa, ca, "mouse"), Input(pb, cb, "mouse")
+    place(pa, ia, "xray", *xt[0])                       # A บันทึก rev 1
+    wait_saved(pa)
+    place(pb, ib, "fluoro", *ft[0])                     # B ยังไม่เห็นของ A (rev 0) -> ชนกัน -> ของ B ใหม่กว่า -> ส่งทับ
+    wait_saved(pb)
+    rev, row = S.task_row(user[0], PKG, "T001")
+    warn_b = pb.text_content("#toast") or ""
+    con = S.con()
+    n_ev = con.execute("SELECT COUNT(*) FROM task_events e JOIN users u ON u.id = e.user_id WHERE u.username = ? AND e.task_id = 'T001'",
+                       (user[0],)).fetchone()[0]
+    con.close()
+    res.check(rev >= 2 and row["fluoro"][0] is not None and "อีกเครื่อง" in warn_b and n_ev >= 2,
+              "M สองเครื่องบันทึกงานเดียวกัน → ยึดอันที่แก้ล่าสุด · เตือนเครื่องที่ส่งทับ · ฉบับก่อนหน้าอยู่ในประวัติ", f"rev={rev} toast={warn_b} events={n_ev}")
 
-    # 1) เปิดครั้งแรก: คัดลอกภาพเข้าเครื่อง พร้อมแถบความคืบหน้า
-    open_pkg(p)
-    p.wait_for_function("() => window.__marker.state.source === 'local'", timeout=15000)
-    ls = local_state(p, pkg)
-    bar = p.evaluate("() => { const b = document.getElementById('importBar'); return [b.value, b.max]; }")
-    res.check(ls["complete"] and ls["stored"] == nfiles and ls["flag"] == pkg and bar == [nfiles, nfiles],
-              "L เปิดครั้งแรก: เก็บภาพในเครื่องครบทุกไฟล์ + แถบความคืบหน้าถึง 100%", f"{ls} bar={bar}")
-    show_whole(p)
-    inp = Input(p, c, "mouse")
-    place_pairs(p, inp, [(t["T001_X.png"][0], t["T001_F.jpg"][0])])
-    flush(p)
-    u1 = p.evaluate(USAGE)
+    # อีกเครื่องแก้ใหม่กว่า (จำลองด้วย updated_at ในอนาคต) -> เครื่องนี้ใช้ของเซิร์ฟเวอร์ และแจ้งให้รู้
+    pb.evaluate("""async () => { const m = window.__marker, t = JSON.parse(JSON.stringify(m.state.tasks['T001']));
+        t.note = 'จากอีกเครื่อง'; t.updated_at = '2999-01-01T00:00:00.000Z';
+        await m.api('/api/tasks/T001?package=' + new URLSearchParams(location.search).get('package'),
+          { method: 'PUT', body: JSON.stringify({ task: t, base_rev: m.sync.revs['T001'] }) }); }""")
+    place(pa, ia, "fluoro", *ft[0])                     # เครื่อง A ยังไม่เห็นจุดฟลูของ B -> วางคู่ของจุด 1 -> ชนกัน
+    pa.wait_for_function("() => window.__marker.state.tasks['T001'].note === 'จากอีกเครื่อง'", timeout=10000)
+    msg = pa.text_content("#toast") or ""
+    res.check("อีกเครื่อง" in msg, "M อีกเครื่องแก้ใหม่กว่า → ใช้ข้อมูลล่าสุดจากเซิร์ฟเวอร์และแจ้งให้รู้", msg)
+    cb.close()
 
-    # 2) ปิดแล้วเปิดใหม่ (= แตะไอคอน): กด ทำงานต่อ ได้เลย ไม่ต้องเลือกไฟล์
-    p.close()
-    p = env.page(c)
-    p.wait_for_selector("#btnResume", timeout=5000)
-    box = p.text_content("#localBox") or ""
-    p.click("#btnResume")
-    p.wait_for_function("() => window.__marker.state.imagesReady && window.__marker.state.source === 'local'", timeout=15000)
-    kept = p.evaluate("() => window.__marker.state.tasks['T001'].xray.filter(Boolean).length")
-    res.check(f"ครบ {len(m['items'])}/{len(m['items'])} งาน" in box and kept == 1 and p.is_hidden("#startScreen"),
-              "L เปิดใหม่: กด ทำงานต่อ แล้วเปิดงานได้เลย ไม่ต้องเลือกไฟล์ จุดอยู่ครบ", box.replace("\n", " ")[:120])
-    goto_task(p, 2)
-    p.wait_for_function("() => window.__marker.state.imagesReady")
-    res.check(p.evaluate("() => window.__marker.viewers.xray.W") == m["items"][2]["xray_size"][0],
-              "L งานอื่นโหลดภาพจากในเครื่องได้ (ขนาดตรง manifest)", "")
+    # หมดเวลาเข้าสู่ระบบระหว่างทำ -> หน้าใส่รหัส · งานที่ค้างไม่หาย · ใส่รหัสแล้วส่งต่อ
+    con = S.con()
+    con.execute("DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)", (user[0],))
+    con.close()
+    place(pa, ia, "xray", *xt[1])
+    pa.wait_for_selector("#loginCard:not([hidden])", timeout=10000)
+    lmsg = pa.text_content("#loginMsg") or ""
+    pa.fill("#loginUser", user[0])
+    pa.fill("#loginPass", user[1])
+    pa.click("#btnLogin")
+    wait_saved(pa, 15000)
+    row2 = S.task_row(user[0], PKG, "T001")[1]
+    local = pa.evaluate("() => window.__marker.state.tasks['T001']")
+    placed = any(q and abs(q["x"] - xt[1][0]) <= 1 and abs(q["y"] - xt[1][1]) <= 1 for q in row2["xray"])
+    same = all((q is None) == (r is None) and (q is None or (abs(q["x"] - r["x"]) < 1e-6 and abs(q["y"] - r["y"]) < 1e-6))
+               for q, r in zip(row2["xray"], local["xray"]))
+    res.check("หมดเวลา" in lmsg and placed and same and pa.is_hidden("#startScreen"),
+              "M หมดเวลาเข้าสู่ระบบ → ใส่รหัสอีกครั้ง แล้วงานที่ค้างถูกส่งต่อ ไม่หาย", f"{lmsg} · {row2['xray'][:2]}")
 
-    # 3) แผงดีบัก: สิทธิ์เก็บถาวร + พื้นที่ที่ใช้
-    p.click("#btnDebug")
-    p.wait_for_function("() => /พื้นที่ที่เว็บใช้ \\d+ MB/.test(document.getElementById('debugInfo').textContent)")
-    dbg = p.text_content("#debugInfo") or ""
-    p.click("#btnDebugClose")
-    res.check("เก็บถาวร (persist)=" in dbg and "ภาพจาก: ในเครื่อง" in dbg, "L แผงดีบัก: แสดงสิทธิ์เก็บถาวร พื้นที่ที่ใช้ และที่มาของภาพ",
-              dbg.split("\n")[0][:80])
-
-    # 4) ภาพในเครื่องเสีย (เนื้อไฟล์ไม่ตรง SHA-256) -> ข้อความชัด + เลือกแพ็กเกจใหม่ -> เก็บไฟล์นั้นใหม่ จุดไม่หาย
-    p.evaluate(IMG_DB_OP, ["corrupt", pkg, m["items"][1]["xray"]])
-    p.evaluate("() => { window.__marker.showTask(1); }")
-    title = wait_dialog(p)
-    body = p.text_content("#dialogBody") or ""
-    repick(p)
-    p.wait_for_function("() => window.__marker.state.imagesReady && window.__marker.state.source === 'local'", timeout=15000)
-    ls = local_state(p, pkg)
-    kept = p.evaluate("() => window.__marker.state.tasks['T001'].xray.filter(Boolean).length")
-    res.check("เลือกไฟล์แพ็กเกจอีกครั้ง" in title and "ไม่ครบหรือเสีย" in body and "ไม่หาย" in body and ls["complete"] and kept == 1,
-              "L ภาพในเครื่องเสีย → บอกให้เลือกแพ็กเกจใหม่ → เก็บใหม่ครบ จุดไม่หาย", f"{title} · {ls}")
-
-    # 5) ภาพหายบางไฟล์ -> หน้าแรกบอกว่าไม่ครบ ไม่มีปุ่ม ทำงานต่อ -> เลือกแพ็กเกจเดิม เก็บเฉพาะที่ขาด
-    p.evaluate(IMG_DB_OP, ["delete", pkg, m["items"][3]["fluoro"]])
-    p.reload()
-    p.wait_for_selector("body[data-ready='1']")
-    p.wait_for_selector("#localBox:not([hidden])")
-    box = p.text_content("#localBox") or ""
-    no_resume = not p.is_visible("#btnResume")
-    p.evaluate("() => { window.__puts = 0; const o = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (v) { if (v && v.blob) window.__puts++; return o.apply(this, arguments); }; }")
-    open_pkg(p)
-    p.wait_for_function("() => window.__marker.state.source === 'local'", timeout=15000)
-    puts = p.evaluate("() => window.__puts")
-    res.check("ไม่ครบ" in box and f"ขาด 1 จาก {nfiles}" in box and no_resume and puts == 1 and local_state(p, pkg)["complete"],
-              "L ภาพหายบางไฟล์ → หน้าแรกบอกชัด → เลือกแพ็กเกจเดิม เก็บเฉพาะไฟล์ที่ขาด", f"{box[:80]} puts={puts}")
-
-    # 6) ภาพหายทั้งหมด (จำลองเบราว์เซอร์ลบ) แต่จุดยังอยู่ -> หน้าแรกบอก "ภาพในเครื่องหายไป"
-    p.evaluate(DROP_IMG_DB)
-    p.reload()
-    p.wait_for_selector("body[data-ready='1']")
-    box = p.text_content("#localBox") or ""
-    saved = p.text_content("#savedList") or ""
-    res.check("หายไป" in box and "จุดที่มาร์กไว้ไม่หาย" in box and pkg in saved and p.is_visible("#localBox"),
-              "L ภาพหายทั้งหมด → หน้าแรกบอกให้เลือกแพ็กเกจใหม่ งานที่ทำไว้ยังอยู่", box[:80])
-    open_pkg(p)
-    p.wait_for_function("() => window.__marker.state.source === 'local'", timeout=15000)
-
-    # 7) ลบภาพออกจากเครื่อง: เตือนสำรอง + ยืนยัน 2 ครั้ง · ลบเฉพาะภาพ จุดยังอยู่ · พื้นที่คืน
-    flush(p)
-    marks_before = idb_record(p, pkg)["tasks"]
-    p.click("#btnOpen")
-    p.wait_for_selector("#btnDeleteImages")
-    p.click("#btnDeleteImages")
-    t1 = wait_dialog(p)
-    b1 = p.text_content("#dialogBody") or ""
-    p.click("#btnDelCancel")
-    still = local_state(p, pkg)["complete"]
-    p.click("#btnDeleteImages")
-    wait_dialog(p)
-    p.click("#btnDelExportFirst")
-    t_exp = wait_dialog(p)
-    jname, _ = download(p, "#btnDlJson", "before_delete")
-    p.click("#btnExportClose")
-    wait_dialog(p)
-    p.click("#btnDelNext")
-    t2 = wait_dialog(p)
-    p.click("#btnDelConfirm")
-    p.wait_for_function("() => !window.ImageStore.flag() && document.getElementById('localBox').hidden", timeout=10000)
-    left = p.evaluate(IMG_DB_COUNT)
-    gone = left == 0
-    marks_after = idb_record(p, pkg)["tasks"]
-    u2 = p.evaluate(USAGE)
-    res.check(t1.startswith("ลบภาพออกจากเครื่อง") and "จุดที่มาร์กไว้จะไม่ถูกลบ" in b1 and "สำรองล่าสุด" in b1 and still
-              and "ส่งออก" in t_exp and jname.endswith(".json") and t2 == "ยืนยันอีกครั้ง",
-              "L ปุ่มลบภาพ: เตือนให้สำรองก่อน (ส่งออกได้จากหน้าต่าง) + ยืนยัน 2 ครั้ง · ยกเลิกแล้วไม่ลบ", f"{t1} / {t2}")
-    res.check(gone and tasks_equal(marks_after, marks_before),
-              "L ลบภาพแล้ว: ไม่เหลือภาพในเครื่อง จุดที่มาร์กไว้ตรงเดิมทุกค่า", f"เหลือ {left} รายการ")
-    res.check(u1 > u0 and u2 < u1, "L ลบภาพแล้ว พื้นที่ที่เว็บใช้ลดลง", f"ก่อนเก็บ {u0} · หลังเก็บ {u1} · หลังลบ {u2} ไบต์")
-    p.close()
-    p = env.page(c)
-    saved = p.text_content("#savedList") or ""
-    res.check(pkg in saved and "ทำแล้ว" in saved and not p.is_visible("#btnResume") and p.is_hidden("#localBox"),
-              "L เปิดเว็บหลังลบภาพ: งานที่ทำไว้ยังแสดง ไม่มีปุ่ม ทำงานต่อ (ต้องเลือกแพ็กเกจ)", saved.replace("\n", " ")[:100])
-    check_page_errors(p, res, "หน้าทดสอบภาพในเครื่อง")
-    c.close()
-
-    # 8) เก็บภาพไม่ได้ (พื้นที่เต็ม) -> ยังทำงานได้ด้วยไฟล์ที่เลือก + แจ้งเตือน
-    c = env.ctx()
-    p = env.page(c)
-    p.evaluate("() => { window.ImageStore.save = () => Promise.reject(new DOMException('full', 'QuotaExceededError')); }")
-    open_pkg(p)
-    p.wait_for_function("() => window.__marker.state.imagesReady")
-    msg = p.text_content("#toast") or ""
-    res.check(p.evaluate("() => window.__marker.state.source") == "files" and "พื้นที่ในเครื่องไม่พอ" in msg,
-              "L พื้นที่ไม่พอเก็บภาพ → แจ้งเตือน แล้วทำงานต่อด้วยไฟล์ที่เลือกได้", msg)
-    c.close()
-
-
-def test_update(env: Env):
-    """ไอคอนบนหน้าจอโฮมได้เวอร์ชันใหม่เองโดยไม่ต้องลบไอคอน: เช็ก version.js → บันทึก → โหลดใหม่ → กลับเข้างานเดิม
-    ข้อมูลในเครื่องไม่หาย · ไม่วนโหลดซ้ำถ้าเซิร์ฟเวอร์ยังส่งของเก่า · ทุกไฟล์ใน index.html มี ?v= ตรงกับ version.js"""
-    res = env.res
-    root = GEN.parents[1]
-    ver = re.search(r"PELNAV_VERSION = '([^']+)'", (root / "marker" / "version.js").read_text(encoding="utf-8")).group(1)
-    html = (root / "marker" / "index.html").read_text(encoding="utf-8")
-    refs = re.findall(r'(?:src|href)="([\w.-]+\.(?:js|css))(\?v=[^"]*)?"', html)
-    bad = [f + q for f, q in refs if q != f"?v={ver}"]
-    res.check(refs and not bad, "U ทุกไฟล์ใน index.html มี ?v= ตรงกับ version.js (กันไฟล์เก่าปนไฟล์ใหม่)", str(bad))
-
-    t = targets()
-    c = env.ctx()
-    p = env.page(c)
-    res.check(p.evaluate("() => window.MARKER_CONFIG.APP_VERSION") == ver, "U เว็บอ่านเวอร์ชันจาก version.js", ver)
-    open_pkg(p)
-    p.wait_for_function("() => window.__marker.state.source === 'local'", timeout=15000)
-    show_whole(p)
-    inp = Input(p, c, "mouse")
-    place_pairs(p, inp, [(t["T001_X.png"][0], t["T001_F.jpg"][0])])
-    # เวอร์ชันเดิม -> ไม่โหลดใหม่
-    same = p.evaluate("() => window.__marker.checkUpdate('test', true)")
-    res.check(same is False and "?v=" not in p.url, "U เวอร์ชันบนเว็บเท่าเดิม → ไม่โหลดใหม่", p.url)
-
-    # จำลองว่า push เวอร์ชันใหม่แล้ว (เซิร์ฟเวอร์ตอบ version.js ใหม่) — ไฟล์อื่นยังเป็นชุดเดิม
-    p.route("**/version.js?check=*", lambda r: r.fulfill(status=200, content_type="application/javascript",
-                                                          body="window.PELNAV_VERSION = '9.9.9';"))
-    p.evaluate("() => { window.__marker.checkUpdate('test', true); }")
-    p.wait_for_url("**/index.html?v=9.9.9", timeout=10000)
-    p.wait_for_selector("body[data-ready='1']")
-    p.wait_for_function("() => window.__marker.state.imagesReady && window.__marker.state.source === 'local'", timeout=15000)
-    kept = p.evaluate("() => window.__marker.state.tasks['T001'].xray.filter(Boolean).length")
-    res.check(kept == 1 and p.is_hidden("#startScreen"),
-              "U มีเวอร์ชันใหม่ → บันทึก โหลดใหม่ แล้วกลับเข้างานเดิมเอง จุดอยู่ครบ (ไม่ต้องลบไอคอน)", p.url)
-    # เซิร์ฟเวอร์ยังส่งไฟล์ชุดเดิม (9.9.9 > เวอร์ชันที่ได้) -> ต้องไม่วนโหลดซ้ำ
-    again = p.evaluate("() => window.__marker.checkUpdate('test', true)")
-    p.wait_for_timeout(1200)
-    logged = p.evaluate("() => window.__marker.Debug.entries().some(e => e.msg.includes('ยังได้'))")
-    res.check(again is False and p.url.endswith("?v=9.9.9") and logged,
-              "U โหลดใหม่แล้วยังได้ของเก่า → ไม่วนโหลดซ้ำ (บันทึกในดีบัก)", p.url)
-    # ระหว่างมีหน้าต่างถามค้าง -> ยังไม่โหลดใหม่
-    p.evaluate("() => sessionStorage.removeItem('pelnavUpdateTried')")
-    p.click("#btnUnmarkable")
-    wait_dialog(p)
-    held = p.evaluate("() => window.__marker.checkUpdate('test', true)")
-    res.check(held is False and p.is_visible("#dialog"), "U มีหน้าต่างถามค้าง → ยังไม่โหลดใหม่ (รอจนปิดหน้าต่าง)", "")
-    p.click("#btnReasonCancel")
-    p.unroute("**/version.js?check=*")
-    check_page_errors(p, res, "หน้าทดสอบอัปเดต")
-    c.close()
+    # พักงาน -> บันทึกครบ · ออกจากระบบ -> กลับหน้าใส่รหัส
+    pa.click("#btnFinish")
+    title = wait_dialog(pa)
+    body = pa.text_content("#dialogBody") or ""
+    pa.click("#btnLogout")
+    pa.wait_for_selector("#loginCard:not([hidden])", timeout=10000)
+    me = pa.evaluate("() => fetch('/api/me').then(r => r.status)")
+    res.check(title == "พักงานได้" and "บันทึกบนเซิร์ฟเวอร์ครบแล้ว" in body and "ไม่ต้องสำรอง" in body and me == 401,
+              "M พักงาน → บอกว่าบันทึกครบ ไม่ต้องสำรอง · ออกจากระบบได้", title)
+    check_page_errors(pa, res, "หน้าทดสอบสองเครื่อง")
+    ca.close()
 
 
 def test_skip_jump(env: Env):
@@ -807,7 +487,7 @@ def test_skip_jump(env: Env):
     n = len(m["items"])
     c = env.ctx()
     p = env.page(c)
-    open_pkg(p)
+    user = open_pkg(p)
     idx = lambda: p.evaluate("() => window.__marker.state.index")       # noqa: E731
     st = lambda tid: p.evaluate("(id) => (window.__marker.state.tasks[id] || {}).status", tid)  # noqa: E731
 
@@ -842,35 +522,26 @@ def test_skip_jump(env: Env):
     res.check(st("T001") == "unmarkable" and st("T002") == "skipped" and "ข้ามไว้ 1" in (p.text_content("#progress") or ""),
               "K งานที่ข้ามไว้: กดข้ามซ้ำวนไปงานที่ข้ามถัดไป · ทำเสร็จแล้วไปงานที่ข้ามที่เหลือ", p.text_content("#progress") or "")
 
-    # 4) ไฟล์สำรอง JSON/CSV บันทึกสถานะ skipped
-    p.click("#btnExport")
-    wait_dialog(p)
-    _, cpath = download(p, "#btnDlCsv", "skip")
-    p.click("#btnExportClose")
-    rows = [r for r in csv.DictReader(io.StringIO("\n".join(l for l in cpath.read_text(encoding="utf-8-sig").splitlines()
-                                                          if not l.startswith("#"))))]
-    csv_ok = any(r["task_id"] == "T002" and r["status"] == "skipped" for r in rows)
+    # 4) เซิร์ฟเวอร์บันทึกสถานะ skipped ให้ทีมเห็น
+    flush(p)
+    srv_st = server().task_row(user[0], PKG, "T002")[1]["status"]
 
-    # 5) จบงานขณะยังมีงานที่ข้าม -> เตือนพร้อมจำนวน · ยกเลิกได้ · จบไปก่อนได้
+    # 5) พักงานขณะยังมีงานที่ข้าม -> เตือนพร้อมจำนวน · ยกเลิกได้ · พักไปก่อนได้ (บอกว่าบันทึกครบ)
     p.click("#btnFinish")
     t1 = wait_dialog(p)
     p.click("#btnFinishCancel")
-    still = p.is_hidden("#dialog") and p.is_hidden("#startScreen")
+    still = p.is_hidden("#dialog")
     p.click("#btnFinish")
     wait_dialog(p)
     p.click("#btnFinishAnyway")
-    wait_dialog(p)
-    _, jpath = download(p, "#btnDlJson", "skip")
-    p.wait_for_selector("#startScreen:not([hidden])")
-    data = json.loads(jpath.read_text(encoding="utf-8"))
-    p.wait_for_function("() => (document.getElementById('savedList').textContent || '').includes('ข้ามไว้')")
-    saved = p.text_content("#savedList") or ""
-    res.check(t1 == "ยังมีงานที่ข้ามไว้ 1 งาน" and still, "K กด จบงาน ขณะมีงานที่ข้าม → เตือนพร้อมจำนวน (ยกเลิกได้)", t1)
-    res.check(data["tasks"]["T002"]["status"] == "skipped" and csv_ok and "ข้ามไว้ 1 งาน" in saved,
-              "K ไฟล์สำรอง JSON/CSV บันทึกสถานะ skipped + หน้าแรกแสดงจำนวนที่ข้าม", saved.replace("\n", " ")[:120])
+    t2 = wait_dialog(p)
+    body = p.text_content("#dialogBody") or ""
+    p.click("#btnPauseStay")
+    res.check(t1 == "ยังมีงานที่ข้ามไว้ 1 งาน" and still, "K กด พักงาน ขณะมีงานที่ข้าม → เตือนพร้อมจำนวน (ยกเลิกได้)", t1)
+    res.check(srv_st == "skipped" and t2 == "พักงานได้" and "ข้ามไว้ 1 งาน" in body,
+              "K เซิร์ฟเวอร์บันทึกสถานะ skipped · หน้าต่างพักงานแสดงจำนวนที่ข้าม", f"{srv_st} · {body[:80]}")
 
     # 6) ไปที่งาน: พิมพ์เลข / T-เลข แล้วกระโดดได้ · เลขผิดแจ้งเตือน ไม่ย้าย
-    p.click("#btnStartClose")
     p.fill("#jumpInput", "5")
     p.press("#jumpInput", "Enter")
     p.wait_for_function("() => window.__marker.state.index === 4 && window.__marker.state.imagesReady")
@@ -886,56 +557,54 @@ def test_skip_jump(env: Env):
     c.close()
 
 
-SHARE_STUB = """
-  window.__shared = [];
-  Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (iPad; CPU OS 26_4 like Mac OS X) AppleWebKit/605.1.15 Version/26.4 Mobile/15E148 Safari/604.1' });
-  navigator.canShare = (d) => !!(d && d.files && d.files.length);
-  navigator.share = async (d) => {
-    const files = await Promise.all((d.files || []).map(async (f) => ({ name: f.name, type: f.type, text: await f.text() })));
-    window.__shared.push({ keys: Object.keys(d).sort(), files });
-  };
-"""
-
-
-def test_ios_share(env: Env):
-    """iPad + https: ปุ่ม บันทึกไฟล์สำรองลงแอปไฟล์ ต้องส่งเฉพาะไฟล์ JSON 1 ไฟล์ (ไม่แนบข้อความ = ไม่มีไฟล์ข้อความแถม)"""
+def test_update(env: Env):
+    """ไอคอนบนหน้าจอโฮมได้เวอร์ชันใหม่เองโดยไม่ต้องลบไอคอน: เช็ก version.js → บันทึก → โหลดใหม่ → กลับเข้างานเดิม
+    งานไม่หาย · ไม่วนโหลดซ้ำถ้าเซิร์ฟเวอร์ยังส่งของเก่า · ทุกไฟล์ใน index.html มี ?v= ตรงกับ version.js · URL คง ?package="""
     res = env.res
-    m = manifest()
-    c = env.ctx(init=SHARE_STUB)
+    root = GEN.parents[1]
+    ver = re.search(r"PELNAV_VERSION = '([^']+)'", (root / "marker" / "version.js").read_text(encoding="utf-8")).group(1)
+    html = (root / "marker" / "index.html").read_text(encoding="utf-8")
+    refs = re.findall(r'(?:src|href)="([\w.-]+\.(?:js|css))(\?v=[^"]*)?"', html)
+    bad = [f + q for f, q in refs if q != f"?v={ver}"]
+    res.check(refs and not bad, "U ทุกไฟล์ใน index.html มี ?v= ตรงกับ version.js (กันไฟล์เก่าปนไฟล์ใหม่)", str(bad))
+
+    t = targets()
+    c = env.ctx()
     p = env.page(c)
     open_pkg(p)
+    res.check(p.evaluate("() => window.MARKER_CONFIG.APP_VERSION") == ver, "U เว็บอ่านเวอร์ชันจาก version.js", ver)
+    show_whole(p)
+    inp = Input(p, c, "mouse")
+    place_pairs(p, inp, [(t["T001_X.png"][0], t["T001_F.jpg"][0])])
+    # เวอร์ชันเดิม -> ไม่โหลดใหม่
+    same = p.evaluate("() => window.__marker.checkUpdate('test', true)")
+    res.check(same is False and "?v=" not in p.url, "U เวอร์ชันบนเว็บเท่าเดิม → ไม่โหลดใหม่", p.url)
+
+    # จำลองว่า push เวอร์ชันใหม่แล้ว (เซิร์ฟเวอร์ตอบ version.js ใหม่) — ไฟล์อื่นยังเป็นชุดเดิม
+    p.route("**/version.js?check=*", lambda r: r.fulfill(status=200, content_type="application/javascript",
+                                                          body="window.PELNAV_VERSION = '9.9.9';"))
+    p.evaluate("() => { window.__marker.checkUpdate('test', true); }")
+    p.wait_for_url(lambda u: "v=9.9.9" in u and "package=" in u, timeout=10000)
+    p.wait_for_selector("body[data-ready='1']")
+    p.wait_for_function("() => window.__marker.state.imagesReady", timeout=15000)
+    kept = p.evaluate("() => window.__marker.state.tasks['T001'].xray.filter(Boolean).length")
+    res.check(kept == 1 and p.is_hidden("#startScreen"),
+              "U มีเวอร์ชันใหม่ → บันทึก โหลดใหม่ แล้วกลับเข้างานเดิมเอง จุดอยู่ครบ (ไม่ต้องลบไอคอน)", p.url)
+    # เซิร์ฟเวอร์ยังส่งไฟล์ชุดเดิม (9.9.9 > เวอร์ชันที่ได้) -> ต้องไม่วนโหลดซ้ำ
+    again = p.evaluate("() => window.__marker.checkUpdate('test', true)")
+    p.wait_for_timeout(1200)
+    logged = p.evaluate("() => window.__marker.Debug.entries().some(e => e.msg.includes('ยังได้'))")
+    res.check(again is False and "v=9.9.9" in p.url and logged,
+              "U โหลดใหม่แล้วยังได้ของเก่า → ไม่วนโหลดซ้ำ (บันทึกในดีบัก)", p.url)
+    # ระหว่างมีหน้าต่างถามค้าง -> ยังไม่โหลดใหม่
+    p.evaluate("() => sessionStorage.removeItem('pelnavUpdateTried')")
     p.click("#btnUnmarkable")
-    choose_reason(p, "view_angle")
-    p.wait_for_function("() => window.__marker.state.index === 1")
-    p.click("#btnExport")
     wait_dialog(p)
-    hint = p.text_content("#dialog") or ""
-    p.click("#btnShareJson")
-    p.wait_for_function("() => window.__shared.length === 1")
-    sh = p.evaluate("() => window.__shared[0]")
-    ok_json = len(sh["files"]) == 1 and sh["files"][0]["name"].endswith(".json") and json.loads(sh["files"][0]["text"])["format"] == "pelnav-marks"
-    res.check(sh["keys"] == ["files"] and ok_json, "I แชร์บน iPad: ส่งเฉพาะไฟล์ JSON 1 ไฟล์ ไม่มี title/text", str(sh["keys"]) + " " + str([f["name"] for f in sh["files"]]))
-    res.check("PelNav สำรอง" not in hint and "เลือกโฟลเดอร์" not in hint, "I คำแนะนำในหน้าต่างไม่พูดถึงโฟลเดอร์เฉพาะ", hint[:120])
-    rec = idb_record(p, m["package_id"])
-    res.check(rec["last_backup_at"] is not None, "I แชร์สำเร็จ = บันทึกเวลาสำรองล่าสุด", str(rec["last_backup_at"]))
-    # แก้งานต่อแล้วปิดแอปโดยไม่กดจบงาน -> เปิดใหม่ กรอบเตือนใช้ปุ่มบันทึกลงแอปไฟล์ (แชร์)
-    p.click("#btnExportClose")
-    p.evaluate("() => { window.__shared.length = 0; }")
-    p.click("#btnUnmarkable")
-    choose_reason(p, "unclear")
-    p.wait_for_function("() => window.__marker.state.index === 2")
-    flush(p)
-    p.close()
-    p = env.page(c)
-    p.wait_for_selector("#btnBackupNow")
-    label = p.text_content("#btnBackupNow") or ""
-    p.click("#btnBackupNow")
-    p.wait_for_function("() => window.__shared.length === 1")
-    p.wait_for_selector("#backupReminder", state="hidden", timeout=5000)
-    sh = p.evaluate("() => window.__shared[0]")
-    res.check("แอปไฟล์" in label and len(sh["files"]) == 1 and sh["files"][0]["name"].endswith("_2of6.json"),
-              "I iPad: กรอบเตือนงานรอบก่อน → สำรองทันทีด้วยการบันทึกลงแอปไฟล์", label)
-    check_page_errors(p, res, "หน้าทดสอบแชร์")
+    held = p.evaluate("() => window.__marker.checkUpdate('test', true)")
+    res.check(held is False and p.is_visible("#dialog"), "U มีหน้าต่างถามค้าง → ยังไม่โหลดใหม่ (รอจนปิดหน้าต่าง)", "")
+    p.click("#btnReasonCancel")
+    p.unroute("**/version.js?check=*")
+    check_page_errors(p, res, "หน้าทดสอบอัปเดต")
     c.close()
 
 
@@ -1008,13 +677,20 @@ def test_mac_trackpad(env: Env):
 
 
 def test_private_mode(env: Env):
+    """เบราว์เซอร์เก็บข้อมูลในเครื่องไม่ได้ (โหมดส่วนตัว จำลอง) -> เตือน แต่ยังทำงานและบันทึกขึ้นเซิร์ฟเวอร์ได้"""
     res = env.res
     init = ("IDBFactory.prototype.open = function () { throw new DOMException('The user denied permission', 'SecurityError'); };")
     c = env.ctx(init=init)
     p = env.page(c)
-    txt = p.text_content("#storageStatus") or ""
-    disabled = p.evaluate("() => document.getElementById('inputFiles').disabled")
-    res.check("ห้ามเริ่มงาน" in txt and disabled, "D โหมดส่วนตัว/บันทึกไม่ได้ (จำลอง) → เตือนและห้ามเริ่มงาน", txt[:120])
+    user = server().open(p, PKG)
+    p.wait_for_function("() => (document.getElementById('toast').textContent || '').includes('เก็บงานสำรองในเครื่องไม่ได้')", timeout=8000)
+    wait_loaded(p)
+    show_whole(p)
+    t = targets()
+    place(p, Input(p, c, "mouse"), "xray", *t["T001_X.png"][0])
+    flush(p)
+    row = server().task_row(user[0], PKG, "T001")[1]
+    res.check(row and row["xray"][0] is not None, "D เก็บคิวในเครื่องไม่ได้ (จำลอง) → เตือน แต่ยังบันทึกขึ้นเซิร์ฟเวอร์ได้", "")
     c.close()
 
 
@@ -1026,15 +702,13 @@ def main():
     args = ap.parse_args()
     if not (GEN / "test_package_big" / "manifest.json").exists():
         sys.exit("ยังไม่มีภาพทดสอบ: รัน python tests/make_test_images.py ก่อน")
-    if DL.exists():
-        shutil.rmtree(DL)
     srv, base = start_server()
     res = Results()
     with sync_playwright() as pw:
         browser = pw.chromium.launch(channel=args.channel, headless=not args.headed)
         env = Env(browser, base, res)
-        for fn in (test_box_and_realistic, test_navigation_quality, test_data_safety, test_forced_backup,
-                   test_ios_resilience, test_local_images, test_skip_jump, test_update, test_ios_share, test_mac_trackpad, test_private_mode):
+        for fn in (test_box_and_realistic, test_navigation_quality, test_server_save, test_offline, test_multi_device,
+                   test_skip_jump, test_update, test_mac_trackpad, test_private_mode):
             if args.only and not any(k in fn.__name__ for k in args.only.split(",")):
                 continue
             print(f"> {fn.__name__}", flush=True)
@@ -1044,18 +718,12 @@ def main():
                 res.check(False, f"! {fn.__name__} ล้มกลางคัน", repr(e)[:300])
             print(f"< {fn.__name__}", flush=True)
         browser.close()
-        print("< browser closed", flush=True)
-    # ปิดเซิร์ฟเวอร์ทดสอบแบบไม่รอค้าง (บางครั้ง shutdown() ค้างหลังเทสต์ที่จำลองการเลือกไฟล์ — ไม่เกี่ยวกับตัวเว็บ)
-    import threading
-    th = threading.Thread(target=srv.shutdown, daemon=True)
-    th.start()
-    th.join(3)
-    print("< server closed", flush=True)
-    # edge:// = หน้าต่างดาวน์โหลดของเบราว์เซอร์เอง (ไม่ได้มาจากหน้าเว็บ)
+    srv.shutdown()
     outside = [(mth, u) for mth, u in env.requests
                if not (u.startswith(base) or u.startswith("blob:") or u.startswith("data:") or u.startswith("edge://"))]
-    posts = [(mth, u) for mth, u in env.requests if mth != "GET"]
-    res.check(not outside and not posts, "C ไม่มีคำขอเครือข่ายออกนอกเครื่อง/ไม่มีการส่งข้อมูล", f"{outside[:3]} {posts[:3]}")
+    writes = [(mth, u) for mth, u in env.requests if mth != "GET" and not u.startswith(base + "/api/")]
+    res.check(not outside and not writes, "C ไม่มีคำขอเครือข่ายนอกเซิร์ฟเวอร์ของโครงการ · เขียนข้อมูลเฉพาะ /api",
+              f"{outside[:3]} {writes[:3]}")
 
     for ok, label, detail in res.rows:
         print(f"{'ผ่าน   ' if ok else 'ไม่ผ่าน'}  {label}" + ("" if ok else f"  {detail}"))

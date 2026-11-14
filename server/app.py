@@ -35,7 +35,7 @@ class Config:
     logs: Path
     web: Path
     host: str = "127.0.0.1"
-    port: int = 8080
+    port: int = 8090
     secure_cookies: bool = False      # true เมื่อใช้ผ่าน HTTPS (บนเครื่องแล็บต้องเป็น true)
     trusted_proxy: bool = False       # true เมื่ออยู่หลัง reverse proxy ที่ถือ HTTPS
     session_days: int = 30
@@ -46,7 +46,7 @@ class Config:
 
     @classmethod
     def load(cls, path: Path) -> "Config":
-        d = tomllib.loads(path.read_text(encoding="utf-8"))
+        d = tomllib.loads(path.read_text(encoding="utf-8-sig"))      # utf-8-sig: ไฟล์ที่ PowerShell 5.1 เขียนมี BOM
         base = path.parent.resolve()
         p = d.get("paths", {})
         s = d.get("server", {})
@@ -58,7 +58,7 @@ class Config:
             backups=rel(p.get("backups", "backups"), None),
             logs=rel(p.get("logs", "logs"), None),
             web=rel(p.get("web", ""), ROOT / "marker"),
-            host=s.get("host", "127.0.0.1"), port=int(s.get("port", 8080)),
+            host=s.get("host", "127.0.0.1"), port=int(s.get("port", 8090)),
             secure_cookies=bool(s.get("secure_cookies", False)), trusted_proxy=bool(s.get("trusted_proxy", False)),
             session_days=int(s.get("session_days", 30)),
             backup_every_minutes=int(b.get("every_minutes", 60)),
@@ -105,12 +105,19 @@ def create_app(cfg: Config) -> Flask:
         if not row:
             abort(404)
         pkg_dir = Path(row["path"])
-        mtime = (pkg_dir / "manifest.json").stat().st_mtime
+        try:
+            mtime = (pkg_dir / "manifest.json").stat().st_mtime
+        except OSError:
+            abort(500, description="ไม่พบ manifest ของแพ็กเกจบนเซิร์ฟเวอร์")
         cached = manifests.get(package_id)
         if not cached or cached[0] != mtime:
-            m, _ = load_manifest(pkg_dir)
+            try:
+                m, _ = load_manifest(pkg_dir)
+            except (Invalid, OSError, ValueError) as e:
+                log.error("เปิดแพ็กเกจ %s ไม่ได้: %s", package_id, e)
+                abort(500, description=f"เปิดแพ็กเกจไม่ได้: {e}")
             if m["package_id"] != package_id:
-                abort(500)
+                abort(500, description="package_id ใน manifest ไม่ตรงกับที่ลงทะเบียน")
             manifests[package_id] = (mtime, m)
         return manifests[package_id][1], pkg_dir
 
@@ -175,6 +182,7 @@ def create_app(cfg: Config) -> Flask:
     @app.errorhandler(409)
     @app.errorhandler(413)
     @app.errorhandler(429)
+    @app.errorhandler(500)
     def _err(e):
         if request.path.startswith("/api/"):
             return jsonify(error=getattr(e, "description", str(e)), status=e.code), e.code
