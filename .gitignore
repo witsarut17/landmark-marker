@@ -59,3 +59,9 @@ manual_out/
 # ไฟล์ zip สำหรับย้ายแพ็กเกจไปเครื่องทดสอบ (มีภาพผู้ป่วย ห้ามขึ้น git)
 transfer/
 *.zip
+
+# เซิร์ฟเวอร์: โฟลเดอร์ข้อมูล (ฐานข้อมูล ไฟล์สำรอง log config ภาพ) — ห้ามขึ้น git
+server_data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

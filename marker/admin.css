@@ -1,0 +1,12 @@
+/* หน้าทีมวิจัย (admin.html) — ใช้สีและปุ่มจาก style.css แต่เลื่อนหน้าได้ตามปกติ */
+html, body { overflow: auto; height: auto; }
+body.admin { display: block; padding: 24px 16px; }
+.admin-wrap { max-width: 980px; margin: 0 auto; }
+.admin-wrap h1 { font-size: 22px; margin: 0 0 4px; }
+.admin-wrap .card { margin: 16px 0; }
+.admin-form { display: grid; gap: 10px; max-width: 360px; }
+.admin-form input { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; }
+table.prog { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.prog th, table.prog td { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: middle; }
+table.prog td.num { font-variant-numeric: tabular-nums; }
+.admin-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
