@@ -302,3 +302,9 @@ code { background: #0003; padding: 1px 5px; border-radius: 4px; }
 .jump-input { width: 76px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; font-size: 14px; }
 .jump-input:disabled { opacity: 0.45; }
 #progress .skip-count { color: #ffcc33; font-weight: 700; }
+
+/* เข้าสู่ระบบ (v1.0) */
+.login-form { display: grid; gap: 10px; max-width: 380px; }
+.login-form input { padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; font-size: 16px; }
+#saveLabel { display: inline-block; min-width: 9.5em; white-space: nowrap; }
+#userLabel { white-space: nowrap; }

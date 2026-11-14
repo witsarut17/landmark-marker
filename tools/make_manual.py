@@ -1,15 +1,15 @@
-"""สร้างคู่มือการใช้งานฉบับเต็ม (สำหรับอาจารย์) พร้อมภาพหน้าจอจากเว็บจริงบน GitHub Pages
+"""สร้างคู่มือการใช้งานฉบับเต็ม (สำหรับอาจารย์) พร้อมภาพหน้าจอจากเว็บรุ่นเซิร์ฟเวอร์ (v1.0)
 
-ปกติใช้ภาพทดสอบสังเคราะห์ (tests/generated/) · ถ้ามีไฟล์จุดของทีมบนแพ็กเกจตัวอย่าง (manual_out/sample_marks.json)
-บางขั้นจะใช้ภาพจริงจาก manual_out/sample_package/ (ชุด train) และกำกับหัวข้อว่า (ภาพจริง)
-ถ่ายภาพหน้าจออัตโนมัติด้วย Playwright (Edge) ทั้งแบบคอมพิวเตอร์และ iPad (จำลองขนาดจอ)
-ฟอนต์ TH Sarabun New (SIPA) ดาวน์โหลดครั้งแรกเก็บไว้ที่ .cache/fonts/
+เปิดเซิร์ฟเวอร์ของโครงการในเครื่องนี้ชั่วคราว (127.0.0.1 ข้อมูลชั่วคราว ลบเองเมื่อเสร็จ) แล้วถ่ายภาพหน้าจอด้วย Playwright (Edge)
+ทั้งแบบคอมพิวเตอร์และ iPad (จำลองขนาดจอ) · ปกติใช้ภาพทดสอบสังเคราะห์ (tests/generated/)
+ถ้ามีไฟล์จุดของทีมบนแพ็กเกจตัวอย่าง (manual_out/sample_marks.json) บางขั้นจะใช้ภาพจริงจาก manual_out/sample_package/ (ชุด train)
+และกำกับหัวข้อว่า (ภาพจริง) · ฟอนต์ TH Sarabun New (SIPA) ดาวน์โหลดครั้งแรกเก็บไว้ที่ .cache/fonts/
 ผล: manual_out/คู่มือการใช้งาน_เว็บมาร์กจุดอ้างอิง.pdf + manual_out/shots/ (อยู่ใน .gitignore)
 
 วิธีใช้:
     python tests/make_test_images.py          # ครั้งแรก (สร้างภาพทดสอบ)
     .venv\\Scripts\\python tools/make_manual.py
-    .venv\\Scripts\\python tools/make_manual.py --capture-from http://127.0.0.1:8000/marker/   # ถ่ายจากเว็บในเครื่อง (ก่อน push)
+    .venv\\Scripts\\python tools/make_manual.py --site "https://<ชื่อเว็บ>:8090/"   # ลิงก์ที่พิมพ์ในคู่มือ
 """
 
 from __future__ import annotations
@@ -31,9 +31,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "tools"))
 from test_coordinates import Input, session, to_page  # noqa: E402
+from server_fixture import TestServer  # noqa: E402
 from make_study_package import gitignored  # noqa: E402
 
-SITE = "https://witsarut17.github.io/landmark-marker/"
+SITE = "ลิงก์ที่ทีมวิจัยให้ (เปิดผ่าน VPN ของมหาวิทยาลัย)"
 GEN = ROOT / "tests" / "generated"
 OUT = ROOT / "manual_out"
 SHOTS = OUT / "shots"
@@ -189,24 +190,8 @@ def loupe_item(page, which, n=None):
     return d
 
 
-def files_of(pkg):
-    return [str(p) for p in sorted((GEN / pkg).iterdir()) if p.is_file() and p.name != "targets.json"]
-
-
 def targets(pkg="test_package"):
     return json.loads((GEN / pkg / "targets.json").read_text(encoding="utf-8"))["targets"]
-
-
-def open_pkg(page, pkg="test_package"):
-    page.set_input_files("#inputFiles", files_of(pkg))
-    page.wait_for_function("() => { const v = window.__marker.viewers; return v.xray.img && v.fluoro.img; }", timeout=30000)
-    page.wait_for_timeout(300)
-
-
-def open_pkg_via_home(q, pkg):
-    q.click("#btnOpen")
-    q.wait_for_selector("#startScreen:not([hidden])")
-    open_pkg(q, pkg)
 
 
 def show(page, i):
@@ -385,90 +370,77 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
     with sync_playwright() as pw:
         br = pw.chromium.launch(channel="msedge")
 
-        # ===== 2 เปิดเว็บ =====
+        # ===== เซิร์ฟเวอร์สำหรับถ่ายภาพ (ข้อมูลชั่วคราว บนโน้ตบุ๊กเครื่องนี้เท่านั้น) =====
+        S = TestServer()
+        doc1 = S.add_user(["test_package", "test_package_big"], name="doc1")
+        doc2 = S.add_user(["test_package"], name="doc2")
+        PK = S.pkg_ids["test_package"]
+
+        # ===== 2 เปิดเว็บ และเข้าสู่ระบบ =====
         cd = br.new_context(viewport=DESKTOP, device_scale_factor=1.5, accept_downloads=True, bypass_csp=True)
         p = cd.new_page()
-        p.goto(site)
-        p.wait_for_selector("body[data-ready='1']")
-        m.section("เปิดเว็บ และเพิ่มไอคอนบนหน้าจอโฮมของ iPad",
-                  f"ลิงก์เว็บคือ {shown} เปิดได้ทั้งบนคอมพิวเตอร์และบน iPad "
-                  "บน iPad ให้เปิดเว็บจากไอคอนบนหน้าจอโฮมทุกครั้ง เพราะไอคอนกับ Safari เก็บงานแยกกัน")
-        m.shot(p, "เปิดเว็บบนคอมพิวเตอร์",
-               "เปิดลิงก์ด้วย Chrome หรือ Edge หมายเลข 1 บอกว่าเครื่องนี้บันทึกงานได้ "
-               "และหมายเลข 2 แสดงเมื่อเครื่องนี้ยังไม่มีงานที่บันทึกไว้",
-               [el("#storageStatus", 1), el("#noDataBox", 2)])
+        p.goto(S.url("test_package"))
+        p.wait_for_selector("#loginCard:not([hidden])")
+        m.section("เปิดเว็บ และเข้าสู่ระบบ",
+                  f"ลิงก์เว็บคือ {shown} ต้องต่อ VPN ของมหาวิทยาลัยก่อน แบบเดียวกับตอนเปิด CVAT "
+                  "ทีมวิจัยจะให้ชื่อผู้ใช้และรหัสผ่านของแพทย์แต่ละคน ใส่ครั้งเดียวแล้วเบราว์เซอร์จะจำไว้ประมาณ 30 วัน "
+                  "บน iPad ให้เปิดเว็บจากไอคอนบนหน้าจอโฮมทุกครั้ง เพราะไอคอนกับ Safari เก็บข้อมูลแยกกัน")
+        p.fill("#loginUser", doc1[0])
+        p.fill("#loginPass", doc1[1])
+        m.shot(p, "เข้าสู่ระบบบนคอมพิวเตอร์",
+               "เปิดลิงก์ด้วย Chrome หรือ Edge ใส่ชื่อผู้ใช้และรหัสผ่าน (หมายเลข 1) แล้วกด **เข้าสู่ระบบ** (หมายเลข 2) "
+               "เว็บจะเปิดงานล่าสุดทันที",
+               [el("#loginUser", 1, pad=4), el("#btnLogin", 2)])
+        p.click("#btnLogin")
+        p.wait_for_function("() => window.__marker.state.imagesReady", timeout=30000)
 
         ci = br.new_context(viewport=IPAD, device_scale_factor=2, has_touch=True, user_agent=IPAD_UA,
                             accept_downloads=True, bypass_csp=True)
         ci.add_init_script(IPAD_INIT)
         q = ci.new_page()
-        q.goto(site)
-        q.wait_for_selector("body[data-ready='1']")
-        m.shot(q, "เปิดเว็บบน iPad",
-               "เปิดลิงก์เว็บด้วย Safari ในแท็บปกติ บน iPad จะมีคำแนะนำการเลือกไฟล์เพิ่มขึ้นที่หมายเลข 1",
-               [el("#ipadHint", 1)], device="iPad")
+        q.goto(S.url("test_package"))
+        q.wait_for_selector("#loginCard:not([hidden])")
+        q.fill("#loginUser", doc2[0])
+        m.shot(q, "เข้าสู่ระบบบน iPad",
+               "เปิดลิงก์ด้วย Safari ในแท็บปกติ ใส่ชื่อผู้ใช้และรหัสผ่าน (หมายเลข 1) เมื่อ iPad ถามให้จำรหัสผ่าน ให้กด **บันทึก**",
+               [el("#loginUser", 1, pad=4)], device="iPad")
+        q.fill("#loginPass", doc2[1])
+        q.click("#btnLogin")
+        q.wait_for_function("() => window.__marker.state.imagesReady", timeout=30000)
         m.add_step("เพิ่มไอคอนบนหน้าจอโฮม (ภาพจำลอง)",
                    "ใน Safari กดปุ่มแชร์ (หมายเลข 1) กด **เพิ่มไปยังหน้าจอโฮม** (หมายเลข 2) และ **เพิ่ม** "
                    "แล้วไอคอนจะแสดงบนหน้าจอโฮม (หมายเลข 3)",
                    mock_homescreen(br), "iPad ภาพจำลอง")
-
-        # ===== 3 เปิดแพ็กเกจ =====
-        m.section("เปิดแพ็กเกจภาพ",
-                  "แพ็กเกจภาพคือโฟลเดอร์ที่ทีมวิจัยเตรียมให้ ภายในมีภาพเอกซเรย์และภาพฟลูออโรสโคปีของทุกงาน "
-                  "ชื่อไฟล์เป็นรหัสงาน ไม่มีชื่อหรือรหัสผู้ป่วย ทีมวิจัยจะเปิดแพ็กเกจให้แพทย์ในครั้งแรก "
-                  "แล้วเว็บจะเก็บภาพไว้ในเครื่อง ครั้งต่อไปแพทย์กด ทำงานต่อ ได้เลยโดยไม่ต้องเลือกไฟล์ "
-                  "เมื่อเก็บภาพเสร็จ ทีมวิจัยจะลบโฟลเดอร์แพ็กเกจที่แตกไว้ในแอปไฟล์ และตรวจภาพโดยไปที่งาน 1, 111 และ 222 "
-                  "ให้เห็นภาพครบ แล้วกลับไปงาน 1 ก่อนส่งมอบเครื่องให้แพทย์")
-        m.shot(p, "เปิดแพ็กเกจบนคอมพิวเตอร์",
-               "กด **เลือกทั้งโฟลเดอร์** (หมายเลข 1) แล้วเลือกโฟลเดอร์แพ็กเกจ หากเบราว์เซอร์ถามให้อัปโหลด ให้กด **อัปโหลด** "
-               "ภาพจะเปิดในเครื่องนี้เท่านั้น",
-               [el("#folderLabel", 1)])
-        m.shot(q, "เปิดแพ็กเกจบน iPad",
-               "กด **เลือกไฟล์ทั้งหมด** (หมายเลข 1) แล้วกด **เรียกดู** เข้าโฟลเดอร์แพ็กเกจ "
-               "จากนั้นกด **เลือก** กด **เลือกทั้งหมด** และกด **เปิด**",
-               [el("#filesLabel", 1)], device="iPad")
-        # แพ็กเกจทดสอบเล็กมาก เก็บเสร็จเร็วจนถ่ายไม่ทัน จึงแสดงกล่องความคืบหน้าจริงของเว็บค้างไว้ที่ 5 จาก 12 ไฟล์
-        n_files = 2 * len(json.loads((GEN / "test_package" / "manifest.json").read_text(encoding="utf-8"))["items"])
-        p.evaluate("""(n) => { const b = document.getElementById('importBar'); b.max = n; b.value = 5;
-            document.getElementById('importText').textContent = `5/${n} ไฟล์ · 2 MB`;
-            document.getElementById('importBox').hidden = false; }""", n_files)
-        m.shot(p, "เก็บภาพไว้ในเครื่อง (ครั้งแรกครั้งเดียว)",
-               "เมื่อเปิดแพ็กเกจครั้งแรก เว็บจะเก็บภาพไว้ในเครื่องพร้อมแถบความคืบหน้า (หมายเลข 1) "
-               "ระหว่างนี้ไม่ควรปิดเว็บหรือสลับแอป",
-               [el("#importBox", 1)])
-        p.evaluate("() => { document.getElementById('importBox').hidden = true; }")
-        open_pkg(p)
         # หน้าที่ต้องเห็นตัวภาพ ใช้ภาพจริงจากแพ็กเกจตัวอย่าง (ถ้ามีไฟล์จุดของทีม) — rp = หน้าเว็บที่เปิดแพ็กเกจตัวอย่าง
         R = " (ภาพจริง)" if marks else ""
         if marks:
+            S.register("sample", SAMPLE_PKG)
+            doc3 = S.add_user(["sample"], name="doc3")
             cr = br.new_context(viewport=DESKTOP, device_scale_factor=1.5, bypass_csp=True)
             rp = cr.new_page()
-            rp.goto(site)
-            rp.wait_for_selector("body[data-ready='1']")
-            rp.set_input_files("#inputFiles", [str(f) for f in sorted(SAMPLE_PKG.iterdir()) if f.is_file()])
-            rp.wait_for_function("() => { const v = window.__marker.viewers; return v.xray.img && v.fluoro.img; }", timeout=60000)
+            S.open(rp, "sample", doc3)
+            rp.wait_for_function("() => window.__marker.state.imagesReady", timeout=60000)
             show(rp, marks["index"][marks["normal_id"]])
             rinp = Input(rp, cr, "mouse")
         else:
             rp, rinp = p, Input(p, cd, "mouse")
-        m.shot(rp, "หน้าจอเมื่อเปิดแพ็กเกจแล้ว" + R,
-               "งานแรกจะแสดงทันที ภาพเอกซเรย์อยู่ทางซ้าย (หมายเลข 1) ภาพฟลูออโรสโคปีอยู่ทางขวา (หมายเลข 2) "
+        m.shot(rp, "หน้าจอเมื่อเข้าสู่ระบบแล้ว" + R,
+               "งานแสดงทันที ภาพเอกซเรย์อยู่ทางซ้าย (หมายเลข 1) ภาพฟลูออโรสโคปีอยู่ทางขวา (หมายเลข 2) "
                "และแถบหมายเลข 3 บอกขั้นตอนถัดไป",
                [el("#paneX", 1, pad=-2), el("#paneF", 2, pad=-2), el("#hintBar", 3, pad=-2)])
 
         # ===== 4 หน้าจอหลัก =====
         show(p, 5)
         m.section("หน้าจอหลักและปุ่มต่าง ๆ")
-        items = [el("#btnOpen", 1), el("#taskLabel", 2), el("#progress", 3), el(".jump-box", 4, at="below"),
-                 el("#btnPrev", 5), el("#btnNext", 6), el("#btnSkip", 7), el("#btnUnmarkable", 8), el("#btnUndo", 9),
-                 el("#btnDelete", 10), el("#btnFinger", 11), el("#btnExport", 12), el("#btnFinish", 13),
-                 el("#saveLabel", 14, at="below"), el("#btnDebug", 15),
-                 el("#hintText", 16, at="below"), el("#pairCount", 17, at="below"), el("#btnNote", 18),
-                 el("#howTo", 19, at="below"), el("#btnXView", 20), el("[data-adjust='xray']", 21),
-                 el("[data-reset='fluoro']", 22), el("[data-adjust='fluoro']", 23), el("#readoutX", 24, at="below")]
+        items = [el("#taskLabel", 1), el("#progress", 2, at="below"), el(".jump-box", 3, at="below"),
+                 el("#btnPrev", 4), el("#btnNext", 5), el("#btnSkip", 6), el("#btnUnmarkable", 7), el("#btnUndo", 8),
+                 el("#btnDelete", 9), el("#btnFinger", 10), el("#btnFinish", 11),
+                 el("#saveLabel", 12, at="below"), el("#userLabel", 13, at="below"), el("#btnDebug", 14),
+                 el("#hintText", 15, at="below"), el("#pairCount", 16, at="below"), el("#btnNote", 17),
+                 el("#howTo", 18, at="below"), el("#btnXView", 19), el("[data-adjust='xray']", 20),
+                 el("[data-reset='fluoro']", 21), el("[data-adjust='fluoro']", 22), el("#readoutX", 23, at="below")]
         m.shot(p, "ปุ่มทั้งหมดบนคอมพิวเตอร์", "หมายเลขในภาพตรงกับตารางด้านล่าง", items)
         m.html(BUTTON_TABLE)
-        open_pkg(q)
         show(q, 5)
         m.shot(q, "หน้าจอหลักบน iPad",
                "บน iPad แถบด้านบนแบ่งเป็น 2 แถว ปุ่ม **นิ้ววางจุด** (หมายเลข 1) ใช้เมื่อไม่มี Apple Pencil "
@@ -641,7 +613,7 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
         # ===== ข้ามไปก่อน / ไปที่งาน =====
         m.section("ข้ามงานไปก่อน และไปที่งาน",
                   "งานที่ข้ามไว้นับว่ายังไม่เสร็จ เว็บจึงมีวิธีกันลืม 3 อย่าง คือแสดงจำนวนงานที่ข้ามไว้ "
-                  "พากลับไปงานที่ข้ามเมื่อทำงานอื่นครบ และเตือนเมื่อกดจบงาน")
+                  "พากลับไปงานที่ข้ามเมื่อทำงานอื่นครบ และเตือนเมื่อกดพักงาน")
         p.click("#btnSkip")
         p.wait_for_function("() => window.__marker.state.index === 3 && window.__marker.state.imagesReady")
         p.wait_for_timeout(200)
@@ -650,9 +622,9 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
                [el("#btnSkip", 1), el("#progress", 2, at="below")])
         p.click("#btnFinish")
         wait_dialog(p)
-        m.shot(p, "เตือนเมื่อกดจบงานขณะยังมีงานที่ข้าม",
+        m.shot(p, "เตือนเมื่อกดพักงานขณะยังมีงานที่ข้าม",
                "เว็บจะแจ้งจำนวนงานที่ข้ามไว้ กด **ไปทำงานที่ข้ามไว้** (หมายเลข 1) "
-               "หรือกด **จบงานไปก่อน** (หมายเลข 2) หากจะหยุดวันนี้",
+               "หรือกด **พักงานไปก่อน** (หมายเลข 2) หากจะหยุดวันนี้",
                [el("#btnFinishGoSkipped", 1), el("#btnFinishAnyway", 2)])
         p.click("#btnFinishCancel")
         p.fill("#jumpInput", "5")
@@ -685,97 +657,68 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
         if marks:
             cr.close()
 
-        # ===== บันทึกอัตโนมัติ / สำรอง =====
-        m.section("การบันทึกอัตโนมัติและการสำรองไฟล์",
-                  "เว็บบันทึกงานไว้ในเครื่องทุกครั้งที่วางหรือแก้จุด โดยไม่ต้องกดบันทึก และจะให้สำรองเป็นไฟล์ทุกครั้งที่กด "
-                  "**จบงาน** หากต้องการสำรองระหว่างทำ กด **ส่งออก** ได้ทุกเมื่อ")
-        m.shot(p, "การบันทึกอัตโนมัติ",
-               "เวลาที่บันทึกล่าสุดแสดงที่หมายเลข 1 หากมีข้อความว่าบันทึกไม่สำเร็จเป็นสีแดง "
-               "ให้กด **ส่งออก** เพื่อสำรองไฟล์ทันที",
+        # ===== การบันทึกบนเซิร์ฟเวอร์ และเมื่อเน็ตหลุด =====
+        m.section("การบันทึกบนเซิร์ฟเวอร์ และเมื่อเน็ตหลุด",
+                  "ทุกครั้งที่วางหรือแก้จุด เว็บบันทึกขึ้นเซิร์ฟเวอร์ของโครงการทันที แพทย์ไม่ต้องกดบันทึก ไม่ต้องสำรอง "
+                  "และไม่ต้องส่งไฟล์ หากเน็ตหรือ VPN หลุด เว็บเก็บงานไว้ในเครื่องชั่วคราวแล้วส่งให้เองเมื่อเชื่อมต่อได้อีกครั้ง")
+        p.evaluate("() => window.__marker.flushSave()")
+        p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึกแล้ว')", timeout=15000)
+        m.shot(p, "บันทึกบนเซิร์ฟเวอร์แล้ว",
+               "เวลาที่บันทึกบนเซิร์ฟเวอร์ล่าสุดแสดงที่หมายเลข 1 และชื่อบัญชีที่เข้าสู่ระบบแสดงที่หมายเลข 2",
+               [el("#saveLabel", 1, at="below"), el("#userLabel", 2, at="below")])
+        cd.set_offline(True)
+        p.evaluate("() => { const t = window.__marker.task(); t.note = 'จุด 2 ไม่แน่ใจ'; t.updated_at = new Date().toISOString(); window.__marker.save(); }")
+        p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').includes('ยังไม่ได้ส่ง')", timeout=15000)
+        m.shot(p, "เมื่อเน็ตหรือ VPN หลุด",
+               "แถบนี้จะแสดงจำนวนงานที่ยังไม่ได้ส่งเป็นสีแดง (หมายเลข 1) ทำงานต่อได้ตามปกติ "
+               "งานไม่หาย และเว็บจะส่งให้เองเมื่อเชื่อมต่อได้",
                [el("#saveLabel", 1, at="below")])
-        p.click("#btnOpen")
-        p.wait_for_selector("#startScreen:not([hidden])")
-        open_pkg(p, "test_package_big")
-        for i in range(10):
-            p.click("#btnUnmarkable")
-            choose_reason(p, "unclear")
-            p.wait_for_function(f"() => window.__marker.state.index === {i + 1} && window.__marker.state.imagesReady")
-        p.wait_for_timeout(300)
-        # ปิดเว็บโดยไม่กดจบงาน แล้วเปิดใหม่ -> กรอบเตือนงานรอบก่อน
-        p2 = cd.new_page()
-        p2.goto(site)
-        p2.wait_for_selector("#backupReminder:not([hidden])", timeout=10000)
-        p2.wait_for_timeout(300)
-        m.shot(p2, "เตือนเมื่อครั้งก่อนไม่ได้กดจบงาน",
-               "หากครั้งก่อนปิดเว็บโดยไม่กด **จบงาน** หน้าแรกจะเตือนว่ายังไม่ได้สำรอง (หมายเลข 1) "
-               "ให้กด **สำรองทันที** (หมายเลข 2)",
-               [el("#backupReminder", 1), el("#btnBackupNow", 2)])
-        p2.close()
-        p.click("#btnExport")
-        wait_dialog(p)
-        m.shot(p, "สำรองไฟล์ระหว่างทำ",
-               "กด **ส่งออก** แล้วกด **ดาวน์โหลดไฟล์สำรอง (JSON)** (หมายเลข 1) ไฟล์จะอยู่ในโฟลเดอร์ Downloads",
-               [el("#btnDlJson", 1)])
-        with p.expect_download() as dl:
-            p.click("#btnDlJson")
-        backup = OUT / "_backup_example.json"
-        dl.value.save_as(str(backup))
-        p.click("#btnExportClose")
-        p.wait_for_timeout(300)
+        cd.set_offline(False)
+        p.evaluate("() => window.dispatchEvent(new Event('online'))")
+        p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึกแล้ว')", timeout=20000)
 
-        open_pkg_via_home(q, "test_package_big")
-        q.click("#btnExport")
-        wait_dialog(q)
-        m.shot(q, "สำรองไฟล์บน iPad",
-               "บน iPad กด **บันทึกไฟล์สำรองลงแอปไฟล์** (หมายเลข 1) แล้วกด **บันทึกไปยังไฟล์** และ **บันทึก** "
-               "ไฟล์สำรองจะอยู่ในแอปไฟล์",
-               [el("#btnShareJson", 1)], device="iPad")
-        q.click("#btnShareJson")
-        q.wait_for_timeout(300)
-
-        # ===== 12 จบงาน =====
-        m.section("จบงานและส่งไฟล์สำรองให้ทีมวิจัย",
-                  "ให้กด **จบงาน** ทุกครั้งก่อนเลิกทำงาน ไฟล์สำรองมีเพียงรหัสงานและตำแหน่งจุดอ้างอิง ไม่มีภาพหรือข้อมูลผู้ป่วย")
+        # ===== พักงาน =====
+        m.section("พักงาน",
+                  "เมื่อจะเลิกทำในแต่ละวัน ให้กด **พักงาน** เว็บจะส่งงานที่ค้างให้ครบ แล้วแจ้งว่าบันทึกบนเซิร์ฟเวอร์ครบแล้ว "
+                  "หากยังมีงานที่ข้ามไว้ เว็บจะเตือนจำนวนก่อน")
         p.click("#btnFinish")
-        wait_dialog(p)
-        m.shot(p, "จบงานและสำรองไฟล์",
-               "กด **จบงาน** แล้วกด **ดาวน์โหลดไฟล์สำรอง (JSON)** (หมายเลข 1) "
-               "ไฟล์จะอยู่ในโฟลเดอร์ Downloads ให้ส่งไฟล์ล่าสุดนี้ให้ทีมวิจัย",
-               [el("#btnDlJson", 1)])
-        with p.expect_download():
-            p.click("#btnDlJson")
-        p.wait_for_selector("#startScreen:not([hidden])", timeout=8000)
-        p.wait_for_timeout(300)
-        m.shot(p, "หน้าแรกหลังจบงาน",
-               "หน้าแรกจะแสดงจำนวนงานที่ทำแล้ว เวลาที่บันทึกล่าสุด และเวลาที่สำรองไฟล์ล่าสุด (หมายเลข 1)",
-               [el("#savedList", 1)])
+        t_first = wait_dialog(p)
+        if p.locator("#btnFinishAnyway").count():
+            p.click("#btnFinishAnyway")
+            wait_dialog(p)
+        m.shot(p, "พักงานได้",
+               "เมื่อบันทึกครบ กด **ทำงานต่อ** (หมายเลข 1) หรือ **ออกจากระบบ** (หมายเลข 2) แล้วปิดเว็บได้เลย",
+               [el("#btnPauseStay", 1), el("#btnLogout", 2)])
+        p.click("#btnPauseStay")
 
-        # ===== 13 กลับมาทำต่อ / นำเข้า =====
-        m.section("กลับมาทำต่อ และการนำเข้าไฟล์สำรอง",
-                  "หากหน้าแรกแสดงกรอบสีแดงว่าภาพในเครื่องไม่ครบหรือหายไป ให้ติดต่อทีมวิจัยเพื่อเปิดแพ็กเกจใหม่ "
-                  "จุดที่มาร์กไว้ไม่หาย")
-        # ภาพแรกของหัวข้อนี้: ถือว่างานรอบก่อนสำรองแล้วทุกแพ็กเกจ (ไม่ให้กรอบเตือนปนในภาพ)
-        p.evaluate("""async () => { for (const r of await window.Store.list()) {
-            if (r.package_id === '__probe__') continue; r.last_backup_at = new Date().toISOString(); await window.Store.put(r); } }""")
-        # ในเครื่องจำลองนี้เปิดมา 2 แพ็กเกจ — เก็บภาพไว้เฉพาะแพ็กเกจล่าสุดเหมือนเครื่องแพทย์จริง
-        p.evaluate("""async () => { const l = await window.ImageStore.listRecords();
-            l.sort((a, b) => ((a.stored_at || '') < (b.stored_at || '') ? -1 : 1));
-            for (const r of l.slice(0, -1)) await window.ImageStore.removePackage(r.package_id); }""")
+        # ===== กลับมาทำต่อ =====
+        m.section("กลับมาทำต่อ และการอัปเดตเว็บ",
+                  "ครั้งต่อไปเปิดลิงก์เดิมหลังต่อ VPN เว็บจะเข้าสู่ระบบและไปที่งานล่าสุดเอง "
+                  "เปิดจากเครื่องอื่นด้วยบัญชีเดียวกันก็เห็นงานเดียวกัน เพราะงานอยู่บนเซิร์ฟเวอร์")
         p.close()
         p = cd.new_page()
-        p.goto(site)
-        p.wait_for_selector("body[data-ready='1']")
-        p.wait_for_selector("#btnResume")
+        p.goto(S.url("test_package"))
+        p.wait_for_function("() => window.__marker.state.imagesReady", timeout=30000)
         p.wait_for_timeout(300)
         m.shot(p, "เปิดเว็บเพื่อทำต่อในวันอื่น",
-               "เปิดเว็บด้วยเครื่องและเบราว์เซอร์เดิม หน้าแรกจะแสดงงานที่ทำไว้ (หมายเลข 1) "
-               "กด **ทำงานต่อ** (หมายเลข 2) แล้วเว็บจะกลับไปงานล่าสุด",
-               [el("#savedList", 1), el("#btnResume", 2)])
+               "เว็บไปที่งานล่าสุดเอง (หมายเลข 1) และแสดงจำนวนงานที่ทำแล้ว (หมายเลข 2) โดยไม่ต้องเลือกไฟล์หรือใส่รหัสซ้ำ",
+               [el("#taskLabel", 1), el("#progress", 2, at="below")])
+        con = S.con()
+        con.execute("DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)", (doc1[0],))
+        con.close()
+        p.evaluate("() => { const t = window.__marker.task(); t.duration_ms += 1000; t.updated_at = new Date().toISOString(); window.__marker.save(); }")
+        p.wait_for_selector("#loginCard:not([hidden])", timeout=15000)
+        p.fill("#loginUser", doc1[0])
+        m.shot(p, "เมื่อเว็บขอรหัสผ่านอีกครั้ง",
+               "ประมาณเดือนละครั้งเว็บจะขอรหัสผ่านอีกครั้ง (หมายเลข 1) งานที่ยังไม่ส่งไม่หาย "
+               "ใส่รหัสแล้วกด **เข้าสู่ระบบ** (หมายเลข 2) เว็บจะส่งต่อให้เอง",
+               [el("#loginMsg", 1), el("#btnLogin", 2)])
+        p.fill("#loginPass", doc1[1])
+        p.click("#btnLogin")
+        p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึกแล้ว')", timeout=20000)
         # อัปเดตเว็บเอง: จำลองว่าเซิร์ฟเวอร์มีเวอร์ชันถัดไป แล้วถ่ายข้อความแจ้งก่อนเว็บโหลดใหม่ (0.8 วินาที)
         cur = re.search(r"PELNAV_VERSION = '([^']+)'", (ROOT / "marker" / "version.js").read_text(encoding="utf-8")).group(1)
         nxt = ".".join(cur.split(".")[:2] + [str(int(cur.split(".")[2]) + 1)])
-        p.click("#btnResume")
-        p.wait_for_function("() => window.__marker.state.imagesReady", timeout=30000)
         p.route("**/version.js?check=*", lambda r: r.fulfill(status=200, content_type="application/javascript",
                                                               body=f"window.PELNAV_VERSION = '{nxt}';"))
         p.evaluate("() => { window.__marker.checkUpdate('manual', true); }")
@@ -785,66 +728,38 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
                "เมื่อทีมวิจัยปรับปรุงเว็บ จะมีข้อความแจ้ง (หมายเลข 1) แล้วเว็บโหลดใหม่และกลับเข้างานเดิมเอง "
                "งานที่ทำไว้ไม่หาย และไม่ต้องลบไอคอน",
                [el("#toast", 1)], keep_toast=True)
-        p.wait_for_url(f"**?v={nxt}", timeout=15000)
-        p.wait_for_selector("body[data-ready='1']")
+        p.wait_for_url(lambda u: f"v={nxt}" in u, timeout=15000)
         p.wait_for_function("() => window.__marker.state.imagesReady", timeout=30000)
         p.unroute("**/version.js?check=*")
-        cn = br.new_context(viewport=DESKTOP, device_scale_factor=1.5, bypass_csp=True)
-        n = cn.new_page()
-        n.goto(site)
-        n.wait_for_selector("body[data-ready='1']")
-        m.shot(n, "เปลี่ยนเครื่องหรือข้อมูลในเครื่องหาย",
-               "หน้าแรกจะแสดงกล่องแจ้งเตือน (หมายเลข 1) ให้กด **นำเข้าไฟล์สำรอง** (หมายเลข 2) แล้วเลือกไฟล์สำรองล่าสุด",
-               [el("#noDataBox", 1), el("#noDataBox .file-btn", 2)])
-        n.set_input_files("#noDataBox .inputBackup", str(backup))
-        wait_dialog(n)
-        m.shot(n, "ยืนยันการนำเข้า",
-               "เว็บจะสรุปข้อมูลในไฟล์ (หมายเลข 1) แล้วกด **นำเข้า** (หมายเลข 2) หากเครื่องนั้นมีงานอยู่แล้ว "
-               "จะให้เลือก **รวม (แนะนำ)** หรือ **แทนที่**",
-               [el("#dialogBody", 1), el("#dialogButtons", 2)])
-        n.click("#dialogButtons button >> nth=0")
-        n.wait_for_timeout(400)
-        cn.close()
 
-        # ===== ลบภาพออกจากเครื่อง =====
-        m.section("ลบภาพออกจากเครื่องเมื่อทำงานครบ",
-                  "เมื่อแพทย์ทำครบทุกงานและส่งไฟล์สำรองให้ทีมวิจัยแล้ว ทีมวิจัยจะลบภาพออกจากเครื่องของแพทย์ให้ "
-                  "การลบนี้ลบเฉพาะภาพ ส่วนจุดที่มาร์กไว้ยังอยู่ในเครื่อง จากนั้นทีมวิจัยจะลบโฟลเดอร์แพ็กเกจในแอปไฟล์ "
-                  "ล้างรายการ ลบล่าสุด และล้างแคชของแอปที่ใช้ดาวน์โหลดแพ็กเกจ แล้วตรวจว่าพื้นที่ว่างของเครื่องคืนมา")
-        p.click("#btnOpen")
-        p.wait_for_selector("#btnDeleteImages")
-        p.click("#btnDeleteImages")
-        wait_dialog(p)
-        m.shot(p, "กดลบภาพออกจากเครื่อง",
-               "ที่หน้าแรก กด **ลบภาพออกจากเครื่อง** เว็บจะเตือนให้สำรองไฟล์ก่อน (หมายเลข 1) "
-               "เมื่อสำรองแล้วให้กด **ลบภาพต่อ** (หมายเลข 2)",
-               [el("#btnDelExportFirst", 1), el("#btnDelNext", 2)])
-        p.click("#btnDelNext")
-        wait_dialog(p)
-        m.shot(p, "ยืนยันการลบอีกครั้ง",
-               "กด **ลบภาพ** (หมายเลข 1) เพื่อยืนยัน ภาพจะถูกลบออกจากเครื่อง หากกดผิดให้กด **ยกเลิก**",
-               [el("#btnDelConfirm", 1)])
-        p.click("#btnDelConfirm")
-        p.wait_for_function("() => document.getElementById('localBox').hidden", timeout=10000)
-        p.wait_for_timeout(300)
-        m.shot(p, "หลังลบภาพ",
-               "กรอบภาพในเครื่องหายไป ส่วนงานที่ทำไว้ยังแสดงอยู่ (หมายเลข 1) "
-               "หากจะทำงานต่อภายหลัง ต้องเปิดแพ็กเกจใหม่",
-               [el("#savedList", 1)])
+        # ===== สำหรับทีมวิจัย: หน้าทีม =====
+        team = S.add_user([], role="team", name="team1")
+        m.section("สำหรับทีมวิจัย: ดูความคืบหน้าและดาวน์โหลดผล",
+                  "ทีมวิจัยเปิดหน้าทีมที่ลิงก์เดียวกันแล้วต่อท้ายด้วย admin.html ด้วยบัญชีทีม "
+                  "ไฟล์ผลมีเพียงรหัสงาน พิกัด สถานะ และเวลา ไม่มีภาพหรือข้อมูลผู้ป่วย และเซิร์ฟเวอร์สำรองฐานข้อมูลเองทุกชั่วโมง")
+        ct = br.new_context(viewport=DESKTOP, device_scale_factor=1.5, bypass_csp=True)
+        tp = ct.new_page()
+        S.login(ct, *team)
+        tp.goto(S.base + "/admin.html")
+        tp.wait_for_selector("#overviewCard:not([hidden])", timeout=15000)
+        tp.wait_for_timeout(300)
+        m.shot(tp, "หน้าทีมวิจัย",
+               "ตารางแสดงความคืบหน้าของแพทย์แต่ละคน (หมายเลข 1) กด **JSON** หรือ **CSV** (หมายเลข 2) เพื่อดาวน์โหลดผล",
+               [el("table.prog", 1, pad=2), el("button[data-kind='JSON']", 2)])
+        ct.close()
 
-        # ===== 14 สำหรับอาจารย์ =====
+        # ===== สำหรับอาจารย์ =====
         cb = br.new_context(viewport=DESKTOP, device_scale_factor=1.5, bypass_csp=True)
         b = cb.new_page()
-        b.goto(site)
-        b.wait_for_selector("body[data-ready='1']")
-        b.set_input_files("#inputFiles", files_of("bad_size_package"))
+        S.open(b, "bad_size_package")
         b.wait_for_selector("#errorModal:not([hidden])", timeout=15000)
         m.section("สำหรับอาจารย์: ทดลองใช้เองด้วยชุดภาพทดสอบ", "__TRYOUT__")
-        m.shot(b, "เมื่อเปิดแพ็กเกจที่ไม่ถูกต้อง",
+        m.shot(b, "เมื่อแพ็กเกจไม่ถูกต้อง",
                "เว็บจะแสดงหน้าต่าง **หยุด** (หมายเลข 1) และไม่แสดงภาพ เพื่อป้องกันการวางจุดผิดตำแหน่ง",
                [el("#errorModal .card", 1)])
         cb.close()
         br.close()
+        S.stop()
     return main_full
 
 
@@ -894,29 +809,28 @@ def mock_homescreen(br) -> str:
 
 # ---------------------------------------------------------------- เนื้อหา
 BUTTONS = [
-    ("1", "หน้าแรก", "กลับหน้าแรก เพื่อเปิดแพ็กเกจอื่น นำเข้าไฟล์สำรอง หรือดูสถานะงาน"),
-    ("2", "T006 / 6", "รหัสงานที่กำลังทำ และจำนวนงานทั้งหมด"),
-    ("3", "ทำแล้ว", "จำนวนงานที่ทำเสร็จแล้ว และจำนวนงานที่ข้ามไว้"),
-    ("4", "ไปที่งาน", "พิมพ์เลขงานแล้วกดไป เพื่อกลับไปดูหรือแก้งานเก่า"),
-    ("5", "ก่อนหน้า", "กลับไปงานก่อนหน้าเพื่อดูหรือแก้ไข"),
-    ("6", "ถัดไป", "ไปงานถัดไป เมื่อวางครบ 4 คู่ หรือวาง 3 คู่และระบุเหตุผล"),
-    ("7", "ข้ามไปก่อน", "ข้ามงานที่ยังตัดสินใจไม่ได้ เว็บจะพากลับมาเมื่อทำงานอื่นครบ"),
-    ("8", "มาร์กไม่ได้", "บันทึกว่างานนี้วางจุดไม่ได้ พร้อมเหตุผล"),
-    ("9", "ย้อน", "ยกเลิกการทำล่าสุด"),
-    ("10", "ลบจุด", "ลบจุดที่เลือกอยู่"),
-    ("11", "นิ้ววางจุด", "ใช้บน iPad ที่ไม่มี Apple Pencil เพื่อวางจุดด้วยการกดนิ้วค้าง"),
-    ("12", "ส่งออก", "สำรองไฟล์ผลงานได้ทุกเมื่อ"),
-    ("13", "จบงาน", "จบการทำงานรอบนี้ เว็บจะให้สำรองไฟล์ก่อนกลับหน้าแรก"),
-    ("14", "บันทึก", "เวลาที่เว็บบันทึกงานในเครื่องครั้งล่าสุด"),
-    ("15", "ดีบัก", "ข้อมูลสำหรับทีมวิจัยใช้แก้ปัญหา"),
-    ("16", "แถบคำแนะนำ", "บอกขั้นตอนถัดไป และคำเตือนเมื่อจุดอยู่ใกล้กันเกินไป"),
-    ("17", "ครบกี่คู่", "จำนวนคู่ที่วางครบทั้งสองภาพแล้ว"),
-    ("18", "หมายเหตุ", "บันทึกข้อสังเกตสั้น ๆ ของงานนี้ (ไม่บังคับ)"),
-    ("19", "วิธีใช้", "วิธีวางจุด เลื่อน และซูม สำหรับเครื่องที่ใช้อยู่"),
-    ("20", "ดูทั้งภาพ", "สลับระหว่างดูภาพเอกซเรย์ทั้งภาพ และกลับไปที่กรอบ"),
-    ("21 และ 23", "ปรับภาพ", "ปรับความสว่างและความเปรียบต่าง และกลับสีภาพฟลูออโรสโคปี"),
-    ("22", "รีเซ็ตมุมมอง", "ให้ภาพฟลูออโรสโคปีกลับขนาดพอดีกับช่อง"),
-    ("24", "ตัวเลขด้านบนภาพ", "ระดับซูม และตำแหน่งของจุดที่เลือก"),
+    ("1", "T006 / 6", "รหัสงานที่กำลังทำ และจำนวนงานทั้งหมด"),
+    ("2", "ทำแล้ว", "จำนวนงานที่ทำเสร็จแล้ว และจำนวนงานที่ข้ามไว้"),
+    ("3", "ไปที่งาน", "พิมพ์เลขงานแล้วกดไป เพื่อกลับไปดูหรือแก้งานเก่า"),
+    ("4", "ก่อนหน้า", "กลับไปงานก่อนหน้าเพื่อดูหรือแก้ไข"),
+    ("5", "ถัดไป", "ไปงานถัดไป เมื่อวางครบ 4 คู่ หรือวาง 3 คู่และระบุเหตุผล"),
+    ("6", "ข้ามไปก่อน", "ข้ามงานที่ยังตัดสินใจไม่ได้ เว็บจะพากลับมาเมื่อทำงานอื่นครบ"),
+    ("7", "มาร์กไม่ได้", "บันทึกว่างานนี้วางจุดไม่ได้ พร้อมเหตุผล"),
+    ("8", "ย้อน", "ยกเลิกการทำล่าสุด"),
+    ("9", "ลบจุด", "ลบจุดที่เลือกอยู่"),
+    ("10", "นิ้ววางจุด", "ใช้บน iPad ที่ไม่มี Apple Pencil เพื่อวางจุดด้วยการกดนิ้วค้าง"),
+    ("11", "พักงาน", "ส่งงานที่ค้างให้ครบ แล้วแจ้งว่าบันทึกครบ เพื่อพักหรือออกจากระบบ"),
+    ("12", "บันทึกแล้ว", "เวลาที่บันทึกบนเซิร์ฟเวอร์ล่าสุด หรือจำนวนงานที่ยังไม่ได้ส่งเมื่อเน็ตหลุด"),
+    ("13", "ชื่อบัญชี", "บัญชีที่เข้าสู่ระบบอยู่"),
+    ("14", "ดีบัก", "ข้อมูลสำหรับทีมวิจัยใช้แก้ปัญหา"),
+    ("15", "แถบคำแนะนำ", "บอกขั้นตอนถัดไป และคำเตือนเมื่อจุดอยู่ใกล้กันเกินไป"),
+    ("16", "ครบกี่คู่", "จำนวนคู่ที่วางครบทั้งสองภาพแล้ว"),
+    ("17", "หมายเหตุ", "บันทึกข้อสังเกตสั้น ๆ ของงานนี้ (ไม่บังคับ)"),
+    ("18", "วิธีใช้", "วิธีวางจุด เลื่อน และซูม สำหรับเครื่องที่ใช้อยู่"),
+    ("19", "ดูทั้งภาพ", "สลับระหว่างดูภาพเอกซเรย์ทั้งภาพ และกลับไปที่กรอบ"),
+    ("20 และ 22", "ปรับภาพ", "ปรับความสว่างและความเปรียบต่าง และกลับสีภาพฟลูออโรสโคปี"),
+    ("21", "รีเซ็ตมุมมอง", "ให้ภาพฟลูออโรสโคปีกลับขนาดพอดีกับช่อง"),
+    ("23", "ตัวเลขด้านบนภาพ", "ระดับซูม และตำแหน่งของจุดที่เลือก"),
 ]
 BUTTON_TABLE = ('<table class="btns"><tr><th>หมายเลข</th><th>ปุ่มหรือส่วน</th><th>หน้าที่</th></tr>'
                 + "".join(f"<tr><td>{a}</td><td>{html.escape(b)}</td><td>{html.escape(c)}</td></tr>" for a, b, c in BUTTONS)
@@ -925,33 +839,30 @@ BUTTON_TABLE = ('<table class="btns"><tr><th>หมายเลข</th><th>ป�
 OVERVIEW_1 = ("เว็บมาร์กจุดอ้างอิงใช้ให้ศัลยแพทย์วางจุดอ้างอิงที่ตรงกัน 4 คู่ บนภาพเอกซเรย์ก่อนผ่าตัดและภาพฟลูออโรสโคปีระหว่างผ่าตัด "
               "ของผู้ป่วยรายเดียวกันทีละงาน ในชุดทดสอบ 70 ราย จุดอ้างอิงที่ได้ใช้เป็นค่าอ้างอิงในการวัดความแม่นยำของวิธีจัดวางภาพในงานวิจัย "
               "และงานส่วนหนึ่งจะแสดงซ้ำโดยไม่แจ้ง เพื่อใช้วัดความสม่ำเสมอของแพทย์")
-OVERVIEW_2 = ("ภาพจะเปิดดูและเก็บไว้ในเครื่องของแพทย์เท่านั้น ไม่ถูกส่งขึ้นอินเทอร์เน็ต และทีมวิจัยจะลบภาพออกจากเครื่องเมื่อทำงานครบ "
-              "ภาพทุกภาพปิดชื่อและ HN แล้ว และใช้รหัสงานแทนรหัสผู้ป่วย "
-              "ผลที่ได้มีเพียงรหัสงานและตำแหน่งจุดเท่านั้น งานจะบันทึกไว้ในเครื่องโดยอัตโนมัติ และแพทย์ส่งไฟล์สำรองให้ทีมวิจัยเมื่อทำงานเสร็จ")
+OVERVIEW_2 = ("ภาพเก็บบนเซิร์ฟเวอร์ของโครงการในห้องปฏิบัติการ แพทย์เปิดผ่าน VPN ของมหาวิทยาลัยด้วยบัญชีและรหัสผ่านของตนเอง "
+              "การเชื่อมต่อเข้ารหัส และไม่เปิดให้บุคคลทั่วไปเข้าถึง ภาพไม่ถูกบันทึกลงเครื่องของแพทย์ "
+              "จุดที่วางบันทึกขึ้นเซิร์ฟเวอร์ทุกครั้งโดยอัตโนมัติ แพทย์จึงไม่ต้องเลือกไฟล์ สำรอง หรือส่งไฟล์ "
+              "ผลที่ได้มีเพียงรหัสงานและตำแหน่งจุดเท่านั้น")
 OVERVIEW_NOTE = ("ภาพหน้าจอทั้งหมดในคู่มือนี้ใช้ภาพทดสอบที่สร้างขึ้น ไม่ใช่ภาพผู้ป่วย "
                  "และเลขในวงกลมสีแดงตรงกับคำอธิบายใต้ภาพ")
 OVERVIEW_NOTE_REAL = ("ภาพหน้าจอที่มีคำว่า (ภาพจริง) ในหัวข้อเป็นภาพจริงที่ปิดชื่อและ HN แล้ว "
                       "ภาพหน้าจออื่นใช้ภาพทดสอบที่สร้างขึ้น ไม่ใช่ภาพผู้ป่วย และเลขในวงกลมสีแดงตรงกับคำอธิบายใต้ภาพ")
 
-TRYOUT_INTRO = ("อาจารย์สามารถทดลองใช้เว็บได้เองด้วยชุดภาพทดสอบ ไฟล์ pelnav_testdata.zip ที่ทีมวิจัยส่งให้ "
-                "ภาพในชุดนี้สร้างขึ้นเพื่อการทดสอบ ไม่ใช่ภาพผู้ป่วย")
+TRYOUT_INTRO = ("อาจารย์ทดลองใช้เว็บได้เองด้วยชุดภาพทดสอบ ภาพในชุดนี้สร้างขึ้นเพื่อการทดสอบ ไม่ใช่ภาพผู้ป่วย "
+                "ทีมวิจัยจะสร้างบัญชีทดลองบนเซิร์ฟเวอร์และกำหนดชุดภาพทดสอบให้")
 TRYOUT_STEPS = [
-    "แตกไฟล์ pelnav_testdata.zip จะได้ 4 โฟลเดอร์ ได้แก่ test_package (6 งาน) test_package_big (12 งาน) "
-    "bad_size_package และ bad_exif_package บน iPad ให้บันทึกไฟล์ลงแอปไฟล์ แล้วแตะไฟล์หนึ่งครั้งเพื่อแตกไฟล์",
-    "เปิดลิงก์เว็บ แล้วกด **เลือกทั้งโฟลเดอร์** และเลือก test_package บน iPad ให้กด **เลือกไฟล์ทั้งหมด** แทน",
+    "ต่อ VPN แล้วเปิดลิงก์เว็บ ใส่ชื่อผู้ใช้และรหัสผ่านของบัญชีทดลองที่ทีมวิจัยให้",
     "ในงาน T001 ถึง T005 ภาพมีกากบาทพร้อมตัวเลขตำแหน่งที่ถูกต้อง เช่น 1 (100,200) ให้วางจุดที่กลางกากบาท "
     "แล้วคลิกที่จุดเพื่อดูตำแหน่งด้านบนภาพ ตำแหน่งควรคลาดไม่เกิน 1 จึงใช้ตรวจความแม่นยำของการวางจุดได้",
     "ในงาน T006 ภาพฟลูออโรสโคปีเป็นบริเวณในกรอบที่ขยาย หมุน และกลับสี ให้ลองวาง 4 คู่ที่กากบาทที่ตรงกันในทั้งสองภาพ",
     "ลองกด **มาร์กไม่ได้** ลองวาง 3 คู่แล้วกด **ถัดไป** ลองบันทึก **หมายเหตุ** และลองกด **ปรับภาพ**",
     "ลองกด **ข้ามไปก่อน** 1 งาน แล้วทำงานที่เหลือให้เสร็จ เว็บต้องพากลับไปงานที่ข้ามเอง "
     "และลองพิมพ์เลขงานในช่อง **ไปที่งาน**",
-    "ปิดแท็บระหว่างทำงาน แล้วเปิดลิงก์ใหม่ หน้าแรกต้องแสดงงานที่ทำไว้ และกด **ทำงานต่อ** ได้โดยไม่ต้องเลือกไฟล์ จุดต้องอยู่ครบ",
-    "เปิด test_package_big แล้วกด **มาร์กไม่ได้** 3 งาน ปิดแท็บโดยไม่กด **จบงาน** แล้วเปิดลิงก์ใหม่ "
-    "หน้าแรกต้องเตือนว่ายังไม่ได้สำรองงานรอบก่อน ให้กด **สำรองทันที** เก็บไฟล์ไว้",
-    "เปิดเว็บในเบราว์เซอร์อื่น แล้วกด **นำเข้าไฟล์สำรอง** และเลือกไฟล์จากข้อก่อนหน้า งานต้องกลับมาครบ",
-    "เปิด bad_size_package และ bad_exif_package เว็บต้องแสดงหน้าต่าง **หยุด** และไม่แสดงภาพ ดังภาพด้านล่าง",
-    "เมื่อทดลองเสร็จ ให้กด **ลบภาพออกจากเครื่อง** ที่หน้าแรก แล้วล้างข้อมูลเว็บไซต์นี้ในเบราว์เซอร์ "
-    "หรือลบไอคอนทดสอบบน iPad เพื่อไม่ให้ปนกับงานจริง",
+    "ปิดแท็บระหว่างทำงาน แล้วเปิดลิงก์ใหม่ เว็บต้องกลับไปงานเดิมและจุดต้องอยู่ครบ "
+    "ลองเปิดจากอีกเครื่องด้วยบัญชีเดียวกันก็ต้องเห็นงานเดียวกัน",
+    "ลองปิด Wi-Fi ระหว่างทำ แถบด้านบนต้องขึ้นว่ายังไม่ได้ส่ง เมื่อเปิด Wi-Fi และ VPN อีกครั้ง ต้องกลับมาเป็น บันทึกแล้ว",
+    "กด **พักงาน** ต้องขึ้นว่าบันทึกบนเซิร์ฟเวอร์ครบแล้ว",
+    "ขอให้ทีมวิจัยกำหนดชุดภาพที่ขนาดไม่ตรงให้บัญชีทดลอง เว็บต้องแสดงหน้าต่าง **หยุด** และไม่แสดงภาพ ดังภาพด้านล่าง",
 ]
 
 
@@ -1058,12 +969,10 @@ def check_text(page_html: str):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--site", default=SITE, help="ลิงก์เว็บที่พิมพ์ในคู่มือ")
-    ap.add_argument("--capture-from", default="",
-                    help="ถ่ายภาพหน้าจอจากเว็บนี้แทน (เช่น เว็บในเครื่องก่อน push) — คู่มือยังแสดงลิงก์ --site")
     ap.add_argument("--sample-marks", default=str(SAMPLE_MARKS) if SAMPLE_MARKS.exists() else "",
                     help="ไฟล์สำรอง (.json) ที่ทีมวางจุดบนแพ็กเกจตัวอย่างภาพจริง — ไม่มี = ใช้ภาพทดสอบทั้งเล่ม")
     args = ap.parse_args()
-    site = args.site if args.site.endswith("/") else args.site + "/"
+    site = args.site
     for pkg in ("test_package", "test_package_big", "bad_size_package"):
         if not (GEN / pkg / "manifest.json").exists():
             sys.exit("ยังไม่มีภาพทดสอบ: รัน python tests/make_test_images.py ก่อน")
@@ -1075,10 +984,7 @@ def main():
     marks = load_sample_marks(Path(args.sample_marks)) if args.sample_marks else None
 
     m = Manual()
-    shot_site = args.capture_from or site
-    if not shot_site.endswith("/"):
-        shot_site += "/"
-    main_full = capture(shot_site, m, marks, shown=site)
+    main_full = capture(site, m, marks, shown=site)
     version = re.search(r"PELNAV_VERSION = '([^']+)'", (ROOT / "marker" / "version.js").read_text(encoding="utf-8")).group(1)
     page_html = build_html(m, site, version, main_full, bool(marks))
     check_text(page_html)

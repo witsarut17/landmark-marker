@@ -31,7 +31,7 @@ DEFAULT_CONFIG = ROOT / "server_data" / "config.toml"
 CONFIG_TEMPLATE = """# ตั้งค่าเซิร์ฟเวอร์เว็บมาร์กจุด — ไฟล์นี้ห้ามขึ้น GitHub (อยู่ในโฟลเดอร์ข้อมูล)
 [server]
 host = "127.0.0.1"        # บนเครื่องแล็บ: ให้ reverse proxy (HTTPS) ส่งต่อมาที่นี่ ไม่เปิดตรงออกเครือข่าย
-port = 8080
+port = 8090                # 8080 ใช้กับ CVAT บนเครื่องแล็บแล้ว
 secure_cookies = false    # ต้องเป็น true เมื่อใช้ผ่าน HTTPS
 trusted_proxy = false     # true เมื่ออยู่หลัง reverse proxy บนเครื่องเดียวกัน
 session_days = 30

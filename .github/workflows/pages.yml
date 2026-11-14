@@ -1,11 +1,11 @@
 # เผยแพร่เฉพาะโฟลเดอร์ marker/ (ตัวเว็บ) ขึ้น GitHub Pages
 # ไม่มีภาพหรือข้อมูลผู้ป่วยในเว็บ — ตรวจด้วย tools/check_publish.py ก่อนทุกครั้ง
+# v1.0 ขึ้นไปเป็นรุ่นเซิร์ฟเวอร์ (ต้องมีโปรแกรม server/ อยู่เบื้องหลัง) ใช้บน GitHub Pages ไม่ได้
+# จึงไม่เผยแพร่อัตโนมัติเมื่อ push แล้ว — GitHub Pages คงเป็น v0.9.0 (รุ่นเลือกไฟล์) ไว้เป็นตัวสาธิตและทางสำรอง
+# สั่งเผยแพร่เองได้ที่แท็บ Actions เฉพาะเมื่อตั้งใจจริง
 name: Deploy marker to GitHub Pages
 
 on:
-  push:
-    branches: [main]
-    paths: ["marker/**", "tools/check_publish.py", "tools/bump_version.py", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
