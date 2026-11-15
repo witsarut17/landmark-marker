@@ -1,6 +1,7 @@
 """ฐานข้อมูล SQLite (โหมด WAL) — โครงสร้างตารางและการเชื่อมต่อ
 
 tasks_latest = สถานะล่าสุดต่องาน · task_events = ทุกการบันทึก (ไม่ลบ ไม่ทับ ใช้ตรวจย้อนหลัง/กู้คืน)
+login_links = ลิงก์ส่วนตัวของหมอ (เก็บเฉพาะ hash ของโทเคน) · ตารางใหม่ถูกเพิ่มเองเมื่อเปิดเซิร์ฟเวอร์ (CREATE IF NOT EXISTS)
 """
 
 from __future__ import annotations
@@ -59,6 +60,18 @@ CREATE TABLE IF NOT EXISTS task_events (
   saved_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_task ON task_events (user_id, package_id, task_id);
+CREATE TABLE IF NOT EXISTS login_links (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  token_hash TEXT UNIQUE NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  once INTEGER NOT NULL DEFAULT 0,
+  revoked_at TEXT,
+  use_count INTEGER NOT NULL DEFAULT 0,
+  last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_links_user ON login_links (user_id);
 CREATE TABLE IF NOT EXISTS user_meta (
   user_id INTEGER NOT NULL REFERENCES users(id),
   package_id TEXT NOT NULL,

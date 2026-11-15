@@ -2,8 +2,11 @@
 
   init                         สร้างโฟลเดอร์ข้อมูล + config.toml + ฐานข้อมูล (ค่าเริ่มต้น server_data/)
   add-package <โฟลเดอร์>        ลงทะเบียนแพ็กเกจ (ตรวจ manifest และภาพครบ)
-  add-user <ชื่อ> --role doctor|team   สร้างบัญชี แสดงรหัสผ่านครั้งเดียว
-  reset-password <ชื่อ>         ตั้งรหัสผ่านใหม่ (ออกจากระบบทุกเครื่อง)
+  add-user <ชื่อ> --role doctor|team   สร้างบัญชี (ทีม: แสดงรหัสผ่านครั้งเดียว · หมอ: ไม่มีรหัสผ่าน ใช้ make-link)
+  make-link <ชื่อ> --until YYYY-MM-DD [--once] [--base URL]
+                               สร้างลิงก์ส่วนตัวให้หมอ (แสดงครั้งเดียว) · ลิงก์เดิมถูกยกเลิกและทุกเครื่องต้องแตะลิงก์ใหม่
+  revoke-link <ชื่อ>            ยกเลิกลิงก์ของหมอ (ออกจากระบบทุกเครื่อง) เช่น เมื่อลิงก์หลุด
+  reset-password <ชื่อ>         ตั้งรหัสผ่านใหม่ของบัญชีทีม (ออกจากระบบทุกเครื่อง)
   disable-user <ชื่อ>           ปิดบัญชี (ออกจากระบบทุกเครื่อง)
   assign <ชื่อ> <package_id>    ให้หมอทำแพ็กเกจนี้
   list                         ดูผู้ใช้ แพ็กเกจ ความคืบหน้า
@@ -18,7 +21,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import secrets
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import auth
@@ -30,11 +35,14 @@ from .validate import FINAL, Invalid, load_manifest
 DEFAULT_CONFIG = ROOT / "server_data" / "config.toml"
 CONFIG_TEMPLATE = """# ตั้งค่าเซิร์ฟเวอร์เว็บมาร์กจุด — ไฟล์นี้ห้ามขึ้น GitHub (อยู่ในโฟลเดอร์ข้อมูล)
 [server]
-host = "127.0.0.1"        # บนเครื่องแล็บ: ให้ reverse proxy (HTTPS) ส่งต่อมาที่นี่ ไม่เปิดตรงออกเครือข่าย
+host = "127.0.0.1"        # เครื่องแล็บ: "0.0.0.0" (ตัวติดตั้งตั้งให้) · โน้ตบุ๊ก: "127.0.0.1" ยกเว้นตอนทดสอบกับ iPad
 port = 8090                # 8080 ใช้กับ CVAT บนเครื่องแล็บแล้ว
-secure_cookies = false    # ต้องเป็น true เมื่อใช้ผ่าน HTTPS
-trusted_proxy = false     # true เมื่ออยู่หลัง reverse proxy บนเครื่องเดียวกัน
-session_days = 30
+public_url = "http://127.0.0.1:8090/"   # ที่อยู่ที่หมอเปิด ใช้ตอนสร้างลิงก์ส่วนตัว · เครื่องแล็บ: http://<IP เครื่องแล็บ>:8090/
+# รับคำขอเฉพาะจากเครือข่ายเหล่านี้: 10.x = เครือข่ายภายในมหาวิทยาลัย/VPN · 127.x และ ::1 = เครื่องนี้เอง
+allowed_networks = ["10.0.0.0/8", "127.0.0.0/8", "::1/128"]
+secure_cookies = false    # true เฉพาะเมื่อใช้ผ่าน HTTPS (เครื่องแล็บใช้ http ผ่าน VPN แบบเดียวกับ CVAT)
+trusted_proxy = false     # true เฉพาะเมื่ออยู่หลัง reverse proxy บนเครื่องเดียวกัน
+session_days = 30         # อายุการเข้าสู่ระบบของบัญชีทีม (ของหมอหมดพร้อมลิงก์)
 
 [paths]                   # ทางเทียบกับโฟลเดอร์ของไฟล์นี้
 db = "db/marks.sqlite"
@@ -55,7 +63,9 @@ def load(args) -> Config:
     path = Path(args.config)
     if not path.exists():
         sys.exit(f"ไม่พบ {path} — รัน: python -m server.manage init")
-    return Config.load(path)
+    cfg = Config.load(path)
+    init_db(cfg.db)               # เพิ่มตารางใหม่ (ถ้ามี) ให้ฐานข้อมูลเดิม โดยไม่แตะข้อมูลเดิม
+    return cfg
 
 
 def user_row(con, name: str):
@@ -100,6 +110,12 @@ def cmd_add_user(args):
     name = args.username.strip().lower()
     if con.execute("SELECT 1 FROM users WHERE username = ?", (name,)).fetchone():
         sys.exit(f"มีผู้ใช้ {name} อยู่แล้ว (ใช้ reset-password)")
+    if args.role == "doctor":
+        # หมอไม่มีรหัสผ่าน (เก็บค่าที่ไม่ใช่ hash -> เข้าด้วยรหัสผ่านไม่ได้แน่นอน) · เข้าด้วยลิงก์ส่วนตัว
+        con.execute("INSERT INTO users (username, role, pw_hash, created_at) VALUES (?,?,?,?)",
+                    (name, "doctor", "link-only$" + secrets.token_hex(8), now_iso()))
+        print(f"สร้างผู้ใช้ {name} (doctor) — ขั้นต่อไป: assign แล้ว make-link {name} --until YYYY-MM-DD")
+        return
     pw = auth.generate_password()
     con.execute("INSERT INTO users (username, role, pw_hash, created_at) VALUES (?,?,?,?)",
                 (name, args.role, auth.hash_password(pw), now_iso()))
@@ -110,6 +126,8 @@ def cmd_reset_password(args):
     cfg = load(args)
     con = connect(cfg.db)
     u = user_row(con, args.username)
+    if u["role"] == "doctor":
+        sys.exit(f"{u['username']} เป็นบัญชีหมอ ไม่ใช้รหัสผ่าน — ใช้ make-link {u['username']} --until YYYY-MM-DD")
     pw = auth.generate_password()
     con.execute("UPDATE users SET pw_hash = ?, active = 1 WHERE id = ?", (auth.hash_password(pw), u["id"]))
     con.execute("DELETE FROM sessions WHERE user_id = ?", (u["id"],))
@@ -123,6 +141,65 @@ def cmd_disable_user(args):
     con.execute("UPDATE users SET active = 0 WHERE id = ?", (u["id"],))
     con.execute("DELETE FROM sessions WHERE user_id = ?", (u["id"],))
     print(f"ปิดบัญชี {u['username']} แล้ว")
+
+
+def cmd_make_link(args):
+    cfg = load(args)
+    con = connect(cfg.db)
+    u = user_row(con, args.username)
+    if u["role"] != "doctor":
+        sys.exit(f"{u['username']} เป็นบัญชีทีม — บัญชีทีมใช้รหัสผ่าน (ลิงก์ส่วนตัวใช้กับบัญชีหมอเท่านั้น)")
+    if not u["active"]:
+        sys.exit(f"{u['username']} ถูกปิดบัญชีอยู่")
+    try:
+        exp = auth.end_of_day_th(args.until)
+    except ValueError:
+        sys.exit("--until ต้องเป็นวันที่แบบ YYYY-MM-DD เช่น 2027-06-30")
+    now = datetime.now(timezone.utc)
+    if exp <= now:
+        sys.exit("--until ต้องเป็นวันในอนาคต")
+    if exp > now + timedelta(days=3 * 366):
+        sys.exit("--until ไกลเกิน 3 ปี — ตั้งเป็นวันจบโครงการ")
+    base = (args.base or cfg.public_url or "").strip()
+    if not base:
+        sys.exit("ไม่รู้ที่อยู่เว็บ — ใส่ public_url ใน config.toml หรือใส่ --base http://<IP เครื่องแล็บ>:8090/")
+    if not base.startswith(("http://", "https://")):
+        sys.exit("--base ต้องขึ้นต้นด้วย http:// หรือ https://")
+    base = base.split("#")[0]
+    if not base.endswith("/") and "?" not in base:
+        base += "/"
+    pk = [r[0] for r in con.execute("SELECT package_id FROM assignments WHERE user_id = ?", (u["id"],))]
+    token = auth.new_link(con, u["id"], exp, once=args.once)
+    print(f"ลิงก์ส่วนตัวของ {u['username']} — ใช้ได้ถึงสิ้นวันที่ {args.until}"
+          f"{' (ใช้ได้ครั้งเดียว)' if args.once else ' (แตะซ้ำได้ ใช้ได้หลายเครื่อง)'} · แสดงครั้งเดียว:")
+    print(f"\n{base}#t={token}\n")
+    print("ส่งให้หมอทางช่องทางส่วนตัว (แชตส่วนตัวหรืออีเมลมหาวิทยาลัย) ห้ามโพสต์ในกลุ่ม — ใครได้ลิงก์นี้ไปก็เข้าบัญชีนี้ได้เมื่อต่อ VPN")
+    print("ลิงก์เดิม (ถ้ามี) ใช้ไม่ได้แล้ว และทุกเครื่องที่เข้าอยู่ต้องแตะลิงก์ใหม่ · ลิงก์หลุด: revoke-link หรือ make-link ใหม่")
+    if not pk:
+        print(f"คำเตือน: {u['username']} ยังไม่ได้กำหนดแพ็กเกจ (assign {u['username']} <package_id>)")
+
+
+def cmd_revoke_link(args):
+    cfg = load(args)
+    con = connect(cfg.db)
+    u = user_row(con, args.username)
+    n = auth.revoke_links(con, u["id"])
+    print(f"ยกเลิกลิงก์ของ {u['username']} {n} ลิงก์ และออกจากระบบทุกเครื่องแล้ว — สร้างลิงก์ใหม่: make-link {u['username']} --until YYYY-MM-DD")
+
+
+def link_status(con, user_id: int) -> str:
+    r = con.execute("SELECT * FROM login_links WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,)).fetchone()
+    if not r:
+        return "ยังไม่มีลิงก์"
+    until = datetime.fromisoformat(r["expires_at"]).astimezone(auth.TH).strftime("%Y-%m-%d")
+    used = f"แตะแล้ว {r['use_count']} ครั้ง" + (f" ล่าสุด {r['last_used_at'][:16].replace('T', ' ')} UTC" if r["last_used_at"] else "")
+    if r["revoked_at"]:
+        return f"ลิงก์ถูกยกเลิก ({used})"
+    if datetime.fromisoformat(r["expires_at"]) < datetime.now(timezone.utc):
+        return f"ลิงก์หมดอายุ {until} ({used})"
+    if r["once"] and r["use_count"]:
+        return f"ลิงก์ครั้งเดียวถูกใช้แล้ว ({used})"
+    return f"ลิงก์ใช้ได้ถึง {until} ({used})"
 
 
 def cmd_assign(args):
@@ -149,6 +226,8 @@ def cmd_list(args):
             sts = [json.loads(r[0])["status"] for r in con.execute(
                 "SELECT data FROM tasks_latest WHERE user_id = ? AND package_id = ?", (u["id"], p))]
             line += f"  [{p}: ทำแล้ว {sum(s in FINAL for s in sts)} ข้ามไว้ {sum(s == 'skipped' for s in sts)}]"
+        if u["role"] == "doctor":
+            line += f"  · {link_status(con, u['id'])}"
         print(line)
 
 
@@ -192,11 +271,10 @@ def cmd_run(args):
     app = create_app(cfg)
     bk = BackupThread(cfg.db, cfg.backups, cfg.backup_every_minutes, cfg.keep_hourly, cfg.keep_daily)
     bk.start()
-    log.info("เปิดเซิร์ฟเวอร์ http://%s:%d (secure_cookies=%s, trusted_proxy=%s)", cfg.host, cfg.port,
+    nets = ", ".join(cfg.allowed_networks) or "ทุกที่ (ไม่แนะนำ)"
+    log.info("เปิดเซิร์ฟเวอร์ http://%s:%d (รับจาก %s, secure_cookies=%s, trusted_proxy=%s)", cfg.host, cfg.port, nets,
              cfg.secure_cookies, cfg.trusted_proxy)
-    print(f"เปิดเซิร์ฟเวอร์แล้ว: http://{cfg.host}:{cfg.port}/  (กด Ctrl+C เพื่อปิด)")
-    if not cfg.secure_cookies and cfg.host not in ("127.0.0.1", "localhost"):
-        print("คำเตือน: ใช้ http และเปิดให้เครื่องอื่นเข้าได้ — ใช้ทดสอบภาพทดสอบเท่านั้น ห้ามใช้กับภาพผู้ป่วย")
+    print(f"เปิดเซิร์ฟเวอร์แล้ว: http://{cfg.host}:{cfg.port}/  (กด Ctrl+C เพื่อปิด)\nรับคำขอเฉพาะจาก: {nets}")
     kw = {}
     if cfg.trusted_proxy:
         kw = {"trusted_proxy": "127.0.0.1", "trusted_proxy_headers": {"x-forwarded-for", "x-forwarded-proto", "x-forwarded-host"}}
@@ -219,6 +297,9 @@ def main():
     sub.add_parser("init")
     s = sub.add_parser("add-package"); s.add_argument("folder")
     s = sub.add_parser("add-user"); s.add_argument("username"); s.add_argument("--role", choices=["doctor", "team"], required=True)
+    s = sub.add_parser("make-link"); s.add_argument("username"); s.add_argument("--until", required=True)
+    s.add_argument("--once", action="store_true"); s.add_argument("--base")
+    s = sub.add_parser("revoke-link"); s.add_argument("username")
     s = sub.add_parser("reset-password"); s.add_argument("username")
     s = sub.add_parser("disable-user"); s.add_argument("username")
     s = sub.add_parser("assign"); s.add_argument("username"); s.add_argument("package_id")
@@ -227,7 +308,8 @@ def main():
     sub.add_parser("backup-now")
     s = sub.add_parser("export-json"); s.add_argument("username"); s.add_argument("package_id"); s.add_argument("out")
     args = ap.parse_args()
-    {"init": cmd_init, "add-package": cmd_add_package, "add-user": cmd_add_user, "reset-password": cmd_reset_password,
+    {"init": cmd_init, "add-package": cmd_add_package, "add-user": cmd_add_user, "make-link": cmd_make_link,
+     "revoke-link": cmd_revoke_link, "reset-password": cmd_reset_password,
      "disable-user": cmd_disable_user, "assign": cmd_assign, "list": cmd_list, "run": cmd_run,
      "backup-now": cmd_backup_now, "export-json": cmd_export_json}[args.cmd](args)
 

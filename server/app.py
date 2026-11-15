@@ -1,18 +1,22 @@
 """เว็บแอป Flask: หน้าเว็บมาร์กจุด + API (เข้าสู่ระบบ, manifest, ภาพ, บันทึกจุด, ข้อมูลสำหรับทีม)
 
-ความปลอดภัย: session ฝั่งเซิร์ฟเวอร์ (คุกกี้ HttpOnly + SameSite=Strict + Secure เมื่อใช้ HTTPS),
+ความปลอดภัย: รับเฉพาะคำขอจากเครือข่ายที่อนุญาต (allowed_networks ค่าเริ่มต้น 10.x + เครื่องตัวเอง),
+หมอเข้าด้วยลิงก์ส่วนตัว (POST /api/link-login) · ทีมเข้าด้วยรหัสผ่าน (POST /api/login),
+session ฝั่งเซิร์ฟเวอร์ (คุกกี้ HttpOnly + SameSite=Strict + Secure เมื่อใช้ HTTPS),
 คำขอที่เปลี่ยนข้อมูลต้องมี header X-Requested-With: pelnav และ Origin ตรงกับเว็บนี้,
-ภาพส่งตามรหัสงานเท่านั้น (ผู้ใช้ส่ง path ไม่ได้) และไม่ให้เบราว์เซอร์เก็บแคช, log ไม่มีภาพหรือข้อมูลผู้ป่วย
+ภาพส่งตามรหัสงานเท่านั้น (ผู้ใช้ส่ง path ไม่ได้) และไม่ให้เบราว์เซอร์เก็บแคช, log ไม่มีภาพ ข้อมูลผู้ป่วย หรือโทเคน
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import logging.handlers
 import time
 import tomllib
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, abort, g, jsonify, request, send_file, send_from_directory
@@ -25,6 +29,7 @@ from .validate import FINAL, IMG_EXT, Invalid, clean_task, load_manifest, public
 COOKIE = "pelnav_session"
 CSRF_HEADER = ("X-Requested-With", "pelnav")
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_NETWORKS = ["10.0.0.0/8", "127.0.0.0/8", "::1/128"]     # เครือข่ายภายในมหาวิทยาลัย/VPN (10.x) + เครื่องตัวเอง
 
 
 @dataclass
@@ -36,9 +41,11 @@ class Config:
     web: Path
     host: str = "127.0.0.1"
     port: int = 8090
-    secure_cookies: bool = False      # true เมื่อใช้ผ่าน HTTPS (บนเครื่องแล็บต้องเป็น true)
-    trusted_proxy: bool = False       # true เมื่ออยู่หลัง reverse proxy ที่ถือ HTTPS
-    session_days: int = 30
+    secure_cookies: bool = False      # true เฉพาะเมื่อใช้ผ่าน HTTPS (เครื่องแล็บใช้ http ผ่าน VPN -> false)
+    trusted_proxy: bool = False       # true เฉพาะเมื่ออยู่หลัง reverse proxy บนเครื่องเดียวกัน
+    session_days: int = 30            # อายุการเข้าสู่ระบบของบัญชีทีม (ของหมอหมดพร้อมลิงก์)
+    allowed_networks: list = field(default_factory=lambda: list(DEFAULT_NETWORKS))   # ว่าง [] = รับทุกที่ (ไม่แนะนำ)
+    public_url: str = ""              # ที่อยู่ที่หมอเปิด เช่น http://<IP เครื่องแล็บ>:8090/ (ใช้ตอนสร้างลิงก์)
     backup_every_minutes: int = 60
     keep_hourly: int = 48
     keep_daily: int = 30
@@ -61,6 +68,7 @@ class Config:
             host=s.get("host", "127.0.0.1"), port=int(s.get("port", 8090)),
             secure_cookies=bool(s.get("secure_cookies", False)), trusted_proxy=bool(s.get("trusted_proxy", False)),
             session_days=int(s.get("session_days", 30)),
+            allowed_networks=list(s.get("allowed_networks", DEFAULT_NETWORKS)), public_url=str(s.get("public_url", "")),
             backup_every_minutes=int(b.get("every_minutes", 60)),
             keep_hourly=int(b.get("keep_hourly", 48)), keep_daily=int(b.get("keep_daily", 30)),
         )
@@ -82,7 +90,12 @@ def create_app(cfg: Config) -> Flask:
     app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = 256 * 1024          # ข้อมูลงาน 1 งานเล็กมาก
     log = setup_logging(cfg.logs)
-    limiter = auth.LoginLimiter()
+    limiter = auth.LoginLimiter()                          # รหัสผ่านผิด (บัญชีทีม): 10 ครั้ง/15 นาที ต่อ IP และต่อชื่อ
+    link_limiter = auth.LoginLimiter(max_fail=30)          # ลิงก์ผิด/หมดอายุ: 30 ครั้ง/15 นาที ต่อ IP (VPN อาจให้หลายคนใช้ IP เดียว)
+    try:
+        networks = [ipaddress.ip_network(n, strict=False) for n in cfg.allowed_networks]
+    except ValueError as e:
+        raise SystemExit(f"allowed_networks ใน config.toml ผิด: {e}")
     manifests: dict[str, tuple[float, dict]] = {}
 
     # ---------- ฐานข้อมูลต่อคำขอ ----------
@@ -147,10 +160,24 @@ def create_app(cfg: Config) -> Flask:
             abort(409, description="ยังไม่ได้กำหนดแพ็กเกจ หรือมีหลายแพ็กเกจ — ติดต่อทีม")
         return rows[0]
 
+    def ip_allowed(ip: str) -> bool:
+        if not networks:
+            return True
+        try:
+            a = ipaddress.ip_address(ip.split("%")[0])
+        except ValueError:
+            return False
+        if getattr(a, "ipv4_mapped", None):
+            a = a.ipv4_mapped
+        return any(a in n for n in networks if n.version == a.version)
+
     # ---------- ตรวจทุกคำขอ ----------
     @app.before_request
     def _before():
         g.t0 = time.perf_counter()
+        if not ip_allowed(client_ip()):
+            log.warning("ปฏิเสธคำขอจากนอกเครือข่ายที่อนุญาต ip=%s", client_ip())
+            abort(403, description="เข้าได้เฉพาะจากเครือข่ายภายในของมหาวิทยาลัย — ต่อ VPN ก่อน")
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             if request.headers.get(CSRF_HEADER[0]) != CSRF_HEADER[1]:
                 abort(403, description="คำขอไม่ได้มาจากหน้าเว็บนี้")
@@ -205,12 +232,43 @@ def create_app(cfg: Config) -> Flask:
             log.warning("เข้าสู่ระบบไม่สำเร็จ ip=%s user=%s", ip, username)
             abort(401, description="ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
         limiter.reset(f"user:{username}")
-        token = auth.new_session(db(), row["id"], cfg.session_days)
+        if row["role"] == "doctor":            # หมอเข้าด้วยลิงก์ส่วนตัวเท่านั้น
+            abort(403, description="บัญชีแพทย์เข้าด้วยลิงก์ส่วนตัวที่ทีมวิจัยส่งให้ ไม่ใช้รหัสผ่าน")
+        return start_session(row, *auth.new_session(db(), row["id"], cfg.session_days))
+
+    def start_session(row, token: str, expires):
+        auth.end_session(db(), request.cookies.get(COOKIE))       # session เดิมของเบราว์เซอร์นี้ (ถ้ามี) ไม่ใช้แล้ว
         g.user = row
-        resp = jsonify(username=row["username"], role=row["role"])
-        resp.set_cookie(COOKIE, token, max_age=cfg.session_days * 86400, httponly=True, secure=cfg.secure_cookies,
+        resp = jsonify(username=row["username"], role=row["role"], expires_at=expires.isoformat(timespec="seconds"))
+        max_age = max(60, int((expires - datetime.now(timezone.utc)).total_seconds()))
+        resp.set_cookie(COOKIE, token, max_age=max_age, httponly=True, secure=cfg.secure_cookies,
                         samesite="Strict", path="/")
         return resp
+
+    @app.post("/api/link-login")
+    def link_login():
+        d = request.get_json(silent=True) or {}
+        ip = client_ip()
+        if link_limiter.blocked(f"ip:{ip}"):
+            log.warning("เข้าด้วยลิงก์ถูกระงับชั่วคราว (ลิงก์ผิดหลายครั้ง) ip=%s", ip)
+            abort(429, description="ลองลิงก์ที่ใช้ไม่ได้หลายครั้ง — รอ 15 นาทีแล้วลองใหม่")
+        con = db()
+        con.execute("BEGIN IMMEDIATE")              # ลิงก์ครั้งเดียว: กันสองคำขอพร้อมกันใช้ซ้ำ
+        try:
+            got = auth.use_link(con, str(d.get("token", ""))[:200])
+            if got:
+                row, exp = got
+                token, exp = auth.new_session(con, row["id"], expires=exp)
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+        if not got:
+            link_limiter.fail(f"ip:{ip}")
+            log.warning("เข้าด้วยลิงก์ไม่สำเร็จ (ไม่มี/หมดอายุ/ยกเลิก/ใช้แล้ว) ip=%s", ip)
+            abort(401, description="ลิงก์นี้ใช้ไม่ได้แล้ว (หมดอายุหรือถูกยกเลิก) — ขอลิงก์ใหม่จากทีมวิจัย")
+        log.info("เข้าด้วยลิงก์ส่วนตัว ip=%s user=%s", ip, row["username"])
+        return start_session(row, token, exp)
 
     @app.post("/api/logout")
     def logout():

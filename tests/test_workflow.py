@@ -269,19 +269,24 @@ def test_server_save(env: Env):
     S = server()
     t = targets()
     user = S.add_user([PKG])
+    token = user[1]
     c = env.ctx()
     p = c.new_page()
     p.goto(S.url(PKG))
     p.wait_for_selector("#loginCard:not([hidden])")
-    p.fill("#loginUser", user[0])
-    p.fill("#loginPass", "wrong-password")
-    p.click("#btnLogin")
+    card = p.text_content("#loginCard") or ""
+    res.check("ลิงก์ส่วนตัว" in card and p.locator("#loginCard input[type=password]").count() == 0,
+              "S ยังไม่เข้าสู่ระบบ → บอกให้แตะลิงก์ส่วนตัว · ไม่มีช่องรหัสผ่าน", card[:80])
+    p.goto(S.link("x" * 43, PKG))
     p.wait_for_function("() => (document.getElementById('loginErr').textContent || '').length > 0")
     err = p.text_content("#loginErr") or ""
-    p.fill("#loginPass", user[1])
-    p.click("#btnLogin")
+    res.check("ใช้ไม่ได้" in err and "#t=" not in p.url, "S ลิงก์ผิด/หมดอายุ → แจ้งให้ขอลิงก์ใหม่ · ลบรหัสออกจากแถบที่อยู่", err)
+    p.goto(S.link(token, PKG))
     wait_loaded(p)
-    res.check("ไม่ถูกต้อง" in err and p.is_hidden("#startScreen"), "S เข้าสู่ระบบ: รหัสผิดแจ้งชัด · รหัสถูกเปิดงานได้เลย ไม่ต้องเลือกไฟล์", err)
+    hist = p.evaluate("() => location.href")
+    res.check(p.is_hidden("#startScreen") and token not in hist and "#" not in hist and token not in p.url,
+              "S แตะลิงก์ส่วนตัว → เข้าสู่ระบบและเปิดงานเอง ไม่ต้องพิมพ์ · ลบรหัสออกจากแถบที่อยู่", hist)
+    res.check(not any(token in u for _, u in env.requests), "S รหัสในลิงก์ไม่ถูกส่งไปใน URL ของคำขอใด ๆ (ส่งเฉพาะในเนื้อคำขอเข้าสู่ระบบ)", "")
     res.check(p.locator("#inputFiles").count() == 0 and p.locator("#btnExport").count() == 0 and p.locator("#btnOpen").count() == 0,
               "S ไม่มีปุ่มเลือกไฟล์ / ส่งออก / หน้าแรก ฝั่งหมอ", "")
 
@@ -448,24 +453,24 @@ def test_multi_device(env: Env):
     res.check("อีกเครื่อง" in msg, "M อีกเครื่องแก้ใหม่กว่า → ใช้ข้อมูลล่าสุดจากเซิร์ฟเวอร์และแจ้งให้รู้", msg)
     cb.close()
 
-    # หมดเวลาเข้าสู่ระบบระหว่างทำ -> หน้าใส่รหัส · งานที่ค้างไม่หาย · ใส่รหัสแล้วส่งต่อ
-    con = S.con()
-    con.execute("DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)", (user[0],))
-    con.close()
+    # ทีมสร้างลิงก์ใหม่ (ลิงก์หลุด) ระหว่างหมอทำงาน -> หน้าแตะลิงก์ · งานที่ค้างไม่หาย · แตะลิงก์ใหม่ (แท็บเดิม) แล้วส่งต่อ
+    new_tok = S.new_link(user[0])
     place(pa, ia, "xray", *xt[1])
     pa.wait_for_selector("#loginCard:not([hidden])", timeout=10000)
     lmsg = pa.text_content("#loginMsg") or ""
-    pa.fill("#loginUser", user[0])
-    pa.fill("#loginPass", user[1])
-    pa.click("#btnLogin")
+    pa.goto(S.link(user[1], PKG))                      # ลิงก์เก่า -> ใช้ไม่ได้ งานยังค้างในเครื่อง
+    pa.wait_for_function("() => (document.getElementById('loginErr').textContent || '').includes('ใช้ไม่ได้')", timeout=8000)
+    still = pa.evaluate("() => window.__marker.sync.pending.size")
+    pa.goto(S.link(new_tok, PKG))                      # ลิงก์ใหม่ในแท็บเดิม (เปลี่ยนแค่ #) -> เข้าสู่ระบบต่อ ไม่โหลดหน้าใหม่
     wait_saved(pa, 15000)
     row2 = S.task_row(user[0], PKG, "T001")[1]
     local = pa.evaluate("() => window.__marker.state.tasks['T001']")
     placed = any(q and abs(q["x"] - xt[1][0]) <= 1 and abs(q["y"] - xt[1][1]) <= 1 for q in row2["xray"])
     same = all((q is None) == (r is None) and (q is None or (abs(q["x"] - r["x"]) < 1e-6 and abs(q["y"] - r["y"]) < 1e-6))
                for q, r in zip(row2["xray"], local["xray"]))
-    res.check("หมดเวลา" in lmsg and placed and same and pa.is_hidden("#startScreen"),
-              "M หมดเวลาเข้าสู่ระบบ → ใส่รหัสอีกครั้ง แล้วงานที่ค้างถูกส่งต่อ ไม่หาย", f"{lmsg} · {row2['xray'][:2]}")
+    res.check("แตะลิงก์" in lmsg and still >= 1 and placed and same and pa.is_hidden("#startScreen") and "#t=" not in pa.url,
+              "M ลิงก์ถูกเปลี่ยนระหว่างทำ → ขึ้นหน้าแตะลิงก์ · ลิงก์เก่าใช้ไม่ได้ · แตะลิงก์ใหม่แล้วงานที่ค้างถูกส่งต่อ ไม่หาย",
+              f"{lmsg} · ค้าง {still} · {row2['xray'][:2]}")
 
     # พักงาน -> บันทึกครบ · ออกจากระบบ -> กลับหน้าใส่รหัส
     pa.click("#btnFinish")
@@ -476,6 +481,15 @@ def test_multi_device(env: Env):
     me = pa.evaluate("() => fetch('/api/me').then(r => r.status)")
     res.check(title == "พักงานได้" and "บันทึกบนเซิร์ฟเวอร์ครบแล้ว" in body and "ไม่ต้องสำรอง" in body and me == 401,
               "M พักงาน → บอกว่าบันทึกครบ ไม่ต้องสำรอง · ออกจากระบบได้", title)
+    # วางลิงก์ในช่อง (เมื่อแตะลิงก์แล้วเปิดในแอปอื่น เช่น ไอคอนที่แยกจาก Safari)
+    pa.fill("#linkInput", "ข้อความ ไม่มีลิงก์")
+    pa.click("#btnLink")
+    bad = pa.text_content("#loginErr") or ""
+    pa.fill("#linkInput", "  " + S.link(new_tok, PKG) + "  ")
+    pa.click("#btnLink")
+    wait_loaded(pa)
+    res.check("ไม่พบรหัส" in bad and pa.is_hidden("#startScreen") and pa.input_value("#linkInput") == "",
+              "M วางลิงก์ส่วนตัวในช่อง → เข้าสู่ระบบได้ · วางข้อความที่ไม่ใช่ลิงก์ → แจ้งชัด", bad)
     check_page_errors(pa, res, "หน้าทดสอบสองเครื่อง")
     ca.close()
 
@@ -603,6 +617,20 @@ def test_update(env: Env):
     held = p.evaluate("() => window.__marker.checkUpdate('test', true)")
     res.check(held is False and p.is_visible("#dialog"), "U มีหน้าต่างถามค้าง → ยังไม่โหลดใหม่ (รอจนปิดหน้าต่าง)", "")
     p.click("#btnReasonCancel")
+
+    # แตะลิงก์ส่วนตัวครั้งแรกพอดีกับที่มีเวอร์ชันใหม่ -> โหลดใหม่แล้วยังเข้าสู่ระบบด้วยลิงก์นั้นได้ (รหัสไม่หายระหว่างโหลดใหม่)
+    S = server()
+    cu = env.ctx()
+    pu = cu.new_page()
+    pu.route("**/version.js?check=*", lambda r: r.fulfill(status=200, content_type="application/javascript",
+                                                           body="window.PELNAV_VERSION = '9.9.8';"))
+    uu = S.add_user([PKG])
+    pu.goto(S.link(uu[1], PKG))
+    pu.wait_for_url(lambda u: "v=9.9.8" in u, timeout=10000)
+    wait_loaded(pu)
+    res.check(pu.is_hidden("#startScreen") and "#t=" not in pu.url,
+              "U แตะลิงก์ครั้งแรกพอดีมีเวอร์ชันใหม่ → โหลดใหม่แล้วเข้าสู่ระบบด้วยลิงก์ได้ · ไม่มีรหัสค้างในแถบที่อยู่", pu.url)
+    cu.close()
     p.unroute("**/version.js?check=*")
     check_page_errors(p, res, "หน้าทดสอบอัปเดต")
     c.close()
@@ -694,6 +722,60 @@ def test_private_mode(env: Env):
     c.close()
 
 
+def lan_ip() -> str | None:
+    """เลข IP ของเครื่องในเครือข่าย (ไม่ส่งข้อมูลออกไปจริง) · ไม่มีเครือข่าย -> None"""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))
+        ip = s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+    return None if ip.startswith("127.") else ip
+
+
+def test_lan_http(env: Env):
+    """H: เปิดผ่าน http + เลข IP (ไม่ใช่ 127.0.0.1) แบบเดียวกับเครื่องแล็บ — เบราว์เซอร์ถือว่า "ไม่ปลอดภัย" (isSecureContext = false)
+    ทุกอย่างต้องยังทำงาน · และเซิร์ฟเวอร์ที่ไม่อนุญาตเครือข่ายนั้นต้องปฏิเสธ"""
+    res = env.res
+    ip = lan_ip()
+    if not ip:
+        res.check(True, "H ข้าม: เครื่องนี้ไม่มีเลข IP เครือข่าย (ทดสอบ http ผ่าน IP ไม่ได้)", "")
+        return
+    from server_fixture import TestServer
+    srv = TestServer(packages=("test_package",), host="0.0.0.0", networks=[f"{ip}/32", "127.0.0.0/8"])
+    blocked = TestServer(packages=("test_package",), host="0.0.0.0", networks=["127.0.0.0/8"])
+    try:
+        base = f"http://{ip}:{srv.port}"
+        user = srv.add_user(["test_package"])
+        c = env.browser.new_context(viewport={"width": 1180, "height": 820})
+        c.add_init_script(ERR_INIT)
+        p = c.new_page()
+        p.goto(srv.link(user[1], "test_package", base))
+        wait_loaded(p)
+        secure = p.evaluate("() => window.isSecureContext")
+        show_whole(p)
+        t = targets()
+        place(p, Input(p, c, "mouse"), "xray", *t["T001_X.png"][0])
+        flush(p)
+        p.reload()
+        wait_loaded(p)
+        row = srv.task_row(user[0], "test_package", "T001")[1]
+        st = p.evaluate("() => window.__marker.state.tasks['T001']")
+        res.check(secure is False and row and row["xray"][0] is not None and st["xray"][0] is not None and p.is_hidden("#startScreen"),
+                  "H http ผ่านเลข IP (แบบเครื่องแล็บ): แตะลิงก์ เข้าได้ บันทึกได้ เปิดใหม่ยังเข้าอยู่", f"secure={secure}")
+        check_page_errors(p, res, "หน้า http ผ่าน IP")
+        p.goto(f"http://{ip}:{blocked.port}/")
+        body = p.text_content("body") or ""
+        res.check("VPN" in body, "H เครื่องที่อยู่นอกเครือข่ายที่อนุญาต → เปิดหน้าเว็บไม่ได้ บอกให้ต่อ VPN", body[:80])
+        c.close()
+    finally:
+        srv.stop()
+        blocked.stop()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--headed", action="store_true")
@@ -708,7 +790,7 @@ def main():
         browser = pw.chromium.launch(channel=args.channel, headless=not args.headed)
         env = Env(browser, base, res)
         for fn in (test_box_and_realistic, test_navigation_quality, test_server_save, test_offline, test_multi_device,
-                   test_skip_jump, test_update, test_mac_trackpad, test_private_mode):
+                   test_skip_jump, test_update, test_mac_trackpad, test_private_mode, test_lan_http):
             if args.only and not any(k in fn.__name__ for k in args.only.split(",")):
                 continue
             print(f"> {fn.__name__}", flush=True)

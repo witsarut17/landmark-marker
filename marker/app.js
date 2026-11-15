@@ -518,6 +518,24 @@
   }
   $('btnErrorClose').addEventListener('click', () => { $('errorModal').hidden = true; });
 
+  // ---------- ลิงก์ส่วนตัว (#t=<โทเคน>) ----------
+  // โทเคนอยู่หลัง # จึงไม่ถูกส่งไปกับคำขอหน้าเว็บและไม่อยู่ใน log · อ่านแล้วลบออกจากแถบที่อยู่ทันที (ไม่ค้างในประวัติ/บุ๊กมาร์ก)
+  // เก็บไว้ในหน่วยความจำเท่านั้นจนเข้าสู่ระบบสำเร็จ (ถ้า VPN ยังไม่ต่อ กด ลองใหม่ ได้โดยไม่ต้องแตะลิงก์ใหม่)
+  const TOKEN_RE = /^[A-Za-z0-9_-]{20,200}$/;
+  function takeLinkToken() {
+    const m = /^#(?:.*&)?t=([^&]*)/.exec(location.hash || '');
+    if (!m) return null;
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { location.hash = ''; }
+    return TOKEN_RE.test(m[1]) ? m[1] : '';
+  }
+  function tokenFromText(s) {
+    s = String(s || '').trim();
+    const m = /[#&]t=([A-Za-z0-9_-]{20,200})/.exec(s);
+    if (m) return m[1];
+    return TOKEN_RE.test(s) && s.length >= 40 ? s : null;
+  }
+  let linkToken = takeLinkToken();
+
   // ---------- เซิร์ฟเวอร์ (API ในเว็บเดียวกัน) ----------
   // ?package=<id> ใน URL ใช้เมื่อบัญชีมีหลายแพ็กเกจ (เช่น ตอนทดสอบ) · หมอมีแพ็กเกจเดียว ไม่ต้องใส่
   const PKG_PARAM = new URLSearchParams(location.search).get('package');
@@ -640,8 +658,8 @@
     } catch (e) {
       if (e.status === 401) {
         sync.needLogin = true;
-        Debug.error('หมดเวลาเข้าสู่ระบบ — ต้องใส่รหัสผ่านอีกครั้ง (งานที่ยังไม่ส่งอยู่ในคิว)');
-        showLogin('หมดเวลาเข้าสู่ระบบ ใส่รหัสผ่านอีกครั้ง งานที่ยังไม่ส่งไม่หาย');
+        Debug.error('ต้องเข้าสู่ระบบอีกครั้ง — แตะลิงก์ส่วนตัว (งานที่ยังไม่ส่งอยู่ในคิว)');
+        showLogin(RELOGIN_MSG);
       } else {
         if (!sync.lastErr) Debug.error(`ส่งขึ้นเซิร์ฟเวอร์ไม่ได้ (จะลองใหม่เอง): ${e.message}`);
         sync.lastErr = e.message;
@@ -733,16 +751,54 @@
     $('btnRetry').hidden = which !== 'msg';
     $('startScreen').hidden = false;
   }
+  const RELOGIN_MSG = 'ต้องเข้าสู่ระบบอีกครั้ง (ลิงก์ถูกเปลี่ยนหรือหมดอายุ) — แตะลิงก์ส่วนตัวล่าสุดที่ทีมวิจัยส่งให้ งานที่ยังไม่ส่งไม่หาย';
   function showLogin(msg = '') {
     $('loginErr').textContent = '';
     $('loginMsg').textContent = msg;
     showStart('login');
-    setTimeout(() => { try { ($('loginUser').value ? $('loginPass') : $('loginUser')).focus(); } catch (_) { /* ignore */ } }, 50);
+  }
+  async function linkLogin(token) {
+    const r = await api('/api/link-login', { method: 'POST', body: JSON.stringify({ token }) });
+    linkToken = null;
+    Debug.log(`เข้าสู่ระบบด้วยลิงก์ส่วนตัว (${r.username} ถึง ${String(r.expires_at || '').slice(0, 10)})`);
+    return r;
+  }
+  // ได้ลิงก์ใหม่ระหว่างที่เว็บเปิดอยู่ (แตะลิงก์ในแท็บเดิม หรือวางลิงก์ในช่อง)
+  async function useLink(token) {
+    linkToken = token;
+    if (!state.manifest) { await boot(); return; }
+    try {
+      const r = await linkLogin(token);
+      if (r.username !== sync.user) { location.reload(); return; }      // คนละบัญชี -> เริ่มใหม่ทั้งหมด
+      if (sync.needLogin) {
+        sync.needLogin = false;
+        $('startScreen').hidden = true;
+        Debug.log('เข้าสู่ระบบอีกครั้งแล้ว — ส่งงานที่ค้าง');
+        toast('เข้าสู่ระบบแล้ว งานที่ทำไว้ไม่หาย');
+        flushSoon(0);
+        if (!state.imagesReady) showTask(state.index);
+      }
+    } catch (e) {
+      if (e.status !== 0) linkToken = null;
+      if (sync.needLogin) { showLogin(RELOGIN_MSG); $('loginErr').textContent = e.message; } else toast(e.message, 6000);
+    }
   }
 
   async function boot() {
     showStart('msg', 'กำลังเชื่อมต่อเซิร์ฟเวอร์…');
     $('btnRetry').hidden = true;
+    if (linkToken === '') { linkToken = null; showLogin('ลิงก์ไม่ครบ — คัดลอกลิงก์ทั้งหมดจากข้อความ หรือแตะลิงก์อีกครั้ง'); return; }
+    if (linkToken) {
+      try {
+        await linkLogin(linkToken);
+      } catch (e) {
+        if (e.status === 0) { showStart('msg', `${e.message} — ต่อ VPN แล้วกด ลองใหม่`); return; }   // เก็บโทเคนไว้ลองใหม่
+        linkToken = null;
+        showLogin();
+        $('loginErr').textContent = e.message;
+        return;
+      }
+    }
     let me;
     try {
       me = await api('/api/me');
@@ -814,28 +870,20 @@
     }
   }
 
-  $('loginForm').addEventListener('submit', async (ev) => {
+  $('linkForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     $('loginErr').textContent = '';
-    $('btnLogin').disabled = true;
-    try {
-      const r = await api('/api/login', { method: 'POST', body: JSON.stringify({ username: $('loginUser').value, password: $('loginPass').value }) });
-      $('loginPass').value = '';
-      if (sync.needLogin && state.manifest) {
-        if (r.username !== sync.user) { location.reload(); return; }      // เปลี่ยนบัญชี -> เริ่มใหม่ทั้งหมด
-        sync.needLogin = false;
-        $('startScreen').hidden = true;
-        Debug.log('เข้าสู่ระบบอีกครั้งแล้ว — ส่งงานที่ค้าง');
-        flushSoon(0);
-        if (!state.imagesReady) showTask(state.index);
-        return;
-      }
-      await boot();
-    } catch (e) {
-      $('loginErr').textContent = e.message;
-    } finally {
-      $('btnLogin').disabled = false;
-    }
+    const t = tokenFromText($('linkInput').value);
+    if (!t) { $('loginErr').textContent = 'ไม่พบรหัสในลิงก์ — คัดลอกลิงก์ทั้งหมดจากข้อความแล้ววางใหม่'; return; }
+    $('linkInput').value = '';
+    $('btnLink').disabled = true;
+    try { await useLink(t); } finally { $('btnLink').disabled = false; }
+  });
+  window.addEventListener('hashchange', () => {        // แตะลิงก์ส่วนตัวขณะที่เว็บเปิดอยู่ในแท็บเดิม
+    const t = takeLinkToken();
+    if (t === null) return;
+    if (!t) { toast('ลิงก์ไม่ครบ — คัดลอกลิงก์ทั้งหมดจากข้อความ', 5000); return; }
+    useLink(t);
   });
   $('btnRetry').addEventListener('click', () => { if (sync.user && !state.manifest) openFromServer(); else boot(); });
 
@@ -927,7 +975,7 @@
         sync.needLogin = true;
         viewers.xray.clear('ต้องเข้าสู่ระบบอีกครั้ง');
         viewers.fluoro.clear('ต้องเข้าสู่ระบบอีกครั้ง');
-        showLogin('หมดเวลาเข้าสู่ระบบ ใส่รหัสผ่านอีกครั้ง งานที่ทำไว้ไม่หาย');
+        showLogin(RELOGIN_MSG);
         return;
       }
       if (err instanceof ImageLoadError && err.status === 0) {          // เน็ตหลุด: ให้ลองใหม่ งานไม่หาย
@@ -1232,7 +1280,7 @@
     try { save(); await flushAll(5000); } catch (_) { /* คิวที่ยังไม่ส่งเก็บในเครื่องแล้ว ส่งต่อหลังโหลดใหม่ */ }
     const u = new URL(location.href);               // คง ?package= ไว้
     u.searchParams.set('v', latest);
-    setTimeout(() => { location.replace(u.pathname + u.search); }, 800);
+    setTimeout(() => { location.replace(u.pathname + u.search + (linkToken ? `#t=${linkToken}` : '')); }, 800);   // ยังไม่ได้ใช้ลิงก์ -> ส่งต่อ
     return true;
   }
 
