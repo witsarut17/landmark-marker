@@ -7,13 +7,12 @@
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'self'; img-src 'self' blob: data:; connect-src 'self'; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
+<!-- ไม่ตั้งเป็นแอปแยก (apple-mobile-web-app-capable): ไอคอนบนหน้าจอโฮมจะได้เปิดใน Safari ใช้การเข้าสู่ระบบร่วมกับลิงก์ส่วนตัว -->
 <meta name="apple-mobile-web-app-title" content="PelNav Marker">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-180.png">
 <title>PelNavPlan Landmark Marker</title>
-<link rel="stylesheet" href="style.css?v=1.0.0">
+<link rel="stylesheet" href="style.css?v=1.1.0">
 </head>
 <body>
 
@@ -97,15 +96,16 @@
       <div class="row"><button id="btnRetry" class="btn btn-primary btn-big" hidden>ลองใหม่</button></div>
     </div>
     <div id="loginCard" hidden>
-      <h2 class="small-h">เข้าสู่ระบบ</h2>
+      <h2 class="small-h">เข้าสู่ระบบด้วยลิงก์ส่วนตัว</h2>
       <p id="loginMsg" class="small err-text"></p>
-      <form id="loginForm" class="login-form">
-        <input id="loginUser" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="ชื่อผู้ใช้" required>
-        <input id="loginPass" name="password" type="password" autocomplete="current-password" placeholder="รหัสผ่าน" required>
-        <button id="btnLogin" class="btn btn-primary btn-big" type="submit">เข้าสู่ระบบ</button>
+      <p>แตะ<b>ลิงก์ส่วนตัว</b>ที่ทีมวิจัยส่งให้ (ในแชตหรืออีเมล) เว็บจะเข้าสู่ระบบและเปิดงานล่าสุดเอง ไม่ต้องพิมพ์อะไร</p>
+      <form id="linkForm" class="login-form">
+        <label class="small muted" for="linkInput">หรือคัดลอกลิงก์ส่วนตัวมาวางที่นี่</label>
+        <input id="linkInput" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="วางลิงก์ส่วนตัว">
+        <button id="btnLink" class="btn btn-primary btn-big" type="submit">เข้าสู่ระบบ</button>
         <p id="loginErr" class="small err-text"></p>
       </form>
-      <p class="small muted">ใส่ครั้งเดียว ให้เบราว์เซอร์จำรหัสผ่านไว้ แล้วครั้งต่อไปเปิดลิงก์ก็เข้าได้เลย (ประมาณ 30 วัน)</p>
+      <p class="small muted">บัญชีทีมวิจัยใช้หน้า admin.html</p>
     </div>
     <p class="tip"><b>คำแนะนำ:</b> เลือกจุดที่ชัดและไม่เปลี่ยนรูปตามมุมถ่าย เช่น ขอบรูกระดูก ปลายสกรู มุมแผ่นโลหะ · กระจายให้ทั่วกรอบ · ต้องเห็นชัดทั้งสองภาพ</p>
   </div>
@@ -142,11 +142,11 @@
   <pre id="debugLog"></pre>
 </aside>
 
-<script src="version.js?v=1.0.0"></script>
-<script src="config.js?v=1.0.0"></script>
-<script src="viewer.js?v=1.0.0"></script>
-<script src="loader.js?v=1.0.0"></script>
-<script src="store.js?v=1.0.0"></script>
-<script src="app.js?v=1.0.0"></script>
+<script src="version.js?v=1.1.0"></script>
+<script src="config.js?v=1.1.0"></script>
+<script src="viewer.js?v=1.1.0"></script>
+<script src="loader.js?v=1.1.0"></script>
+<script src="store.js?v=1.1.0"></script>
+<script src="app.js?v=1.1.0"></script>
 </body>
 </html>

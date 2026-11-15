@@ -1,4 +1,10 @@
-"""รหัสผ่าน (scrypt) · session ฝั่งเซิร์ฟเวอร์ · จำกัดการลองรหัสผิด"""
+"""รหัสผ่าน (scrypt, บัญชีทีม) · ลิงก์ส่วนตัว (บัญชีหมอ) · session ฝั่งเซิร์ฟเวอร์ · จำกัดการลองผิด
+
+ลิงก์ส่วนตัว: http://<เครื่องแล็บ>:8090/#t=<โทเคนสุ่ม 256 บิต>
+- โทเคนอยู่หลัง # จึงไม่ถูกส่งไปกับคำขอหน้าเว็บ ไม่อยู่ใน log ของเซิร์ฟเวอร์ · หน้าเว็บส่งให้ POST /api/link-login แล้วลบออกจากแถบที่อยู่
+- ฐานข้อมูลเก็บเฉพาะ sha256 ของโทเคน · ลิงก์ใช้ซ้ำได้จนถึงวันหมดอายุ (หรือครั้งเดียวถ้าสร้างด้วย --once)
+- สร้างลิงก์ใหม่หรือยกเลิกลิงก์ = ลิงก์เก่าใช้ไม่ได้ + ทุกเครื่องที่เข้าอยู่ต้องแตะลิงก์ใหม่
+"""
 
 from __future__ import annotations
 
@@ -45,13 +51,63 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
-def new_session(con, user_id: int, days: int) -> str:
+def new_session(con, user_id: int, days: int = 30, expires: datetime | None = None) -> tuple[str, datetime]:
+    """สร้าง session · คืน (โทเคนสำหรับคุกกี้, เวลาหมดอายุ) · expires = กำหนดเอง (session จากลิงก์หมดพร้อมลิงก์)"""
     token = secrets.token_urlsafe(32)
-    now = datetime.now(timezone.utc)
+    exp = expires or (datetime.now(timezone.utc) + timedelta(days=days))
     con.execute("INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen) VALUES (?,?,?,?,?)",
-                (token_hash(token), user_id, now_iso(),
-                 (now + timedelta(days=days)).isoformat(timespec="seconds"), now_iso()))
+                (token_hash(token), user_id, now_iso(), exp.isoformat(timespec="seconds"), now_iso()))
+    return token, exp
+
+
+# ---------- ลิงก์ส่วนตัวของหมอ ----------
+TH = timezone(timedelta(hours=7))          # เวลาประเทศไทย (ไม่มีเวลาออมแสง)
+
+
+def end_of_day_th(day: str) -> datetime:
+    """'2027-06-30' -> สิ้นวันนั้นตามเวลาประเทศไทย (23:59:59 +07:00) เป็น UTC"""
+    d = datetime.strptime(day, "%Y-%m-%d")
+    return d.replace(hour=23, minute=59, second=59, tzinfo=TH).astimezone(timezone.utc)
+
+
+def revoke_links(con, user_id: int) -> int:
+    """ยกเลิกทุกลิงก์ของผู้ใช้ + ออกจากระบบทุกเครื่อง · คืนจำนวนลิงก์ที่ยกเลิก"""
+    n = con.execute("UPDATE login_links SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+                    (now_iso(), user_id)).rowcount
+    con.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+    return n
+
+
+def new_link(con, user_id: int, expires: datetime, once: bool = False) -> str:
+    """ยกเลิกลิงก์เดิม (และ session เดิม) แล้วสร้างลิงก์ใหม่ · คืนโทเคน (แสดงครั้งเดียว ไม่เก็บตัวจริง)"""
+    token = secrets.token_urlsafe(32)
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        revoke_links(con, user_id)
+        con.execute("INSERT INTO login_links (user_id, token_hash, created_at, expires_at, once) VALUES (?,?,?,?,?)",
+                    (user_id, token_hash(token), now_iso(), expires.isoformat(timespec="seconds"), int(once)))
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
     return token
+
+
+def use_link(con, token: str | None):
+    """ตรวจโทเคนจากลิงก์ · ใช้ได้ -> คืน (row ผู้ใช้, เวลาหมดอายุของลิงก์) · ใช้ไม่ได้ -> None
+    ใช้ได้เมื่อ: มีอยู่ ไม่ถูกยกเลิก ไม่หมดอายุ (ลิงก์ครั้งเดียวต้องยังไม่ถูกใช้) และบัญชีเป็นหมอที่ยังใช้งาน"""
+    if not token or len(token) > 200 or not token.isascii():
+        return None
+    row = con.execute("""SELECT l.id AS link_id, l.expires_at AS link_expires, l.once, l.use_count, l.revoked_at, u.*
+                         FROM login_links l JOIN users u ON u.id = l.user_id WHERE l.token_hash = ?""",
+                      (token_hash(token),)).fetchone()
+    if not row or row["revoked_at"] or not row["active"] or row["role"] != "doctor":
+        return None
+    exp = datetime.fromisoformat(row["link_expires"])
+    if exp < datetime.now(timezone.utc) or (row["once"] and row["use_count"] > 0):
+        return None
+    con.execute("UPDATE login_links SET use_count = use_count + 1, last_used_at = ? WHERE id = ?", (now_iso(), row["link_id"]))
+    return row, exp
 
 
 def session_user(con, token: str | None):

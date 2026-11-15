@@ -9,7 +9,7 @@
 วิธีใช้:
     python tests/make_test_images.py          # ครั้งแรก (สร้างภาพทดสอบ)
     .venv\\Scripts\\python tools/make_manual.py
-    .venv\\Scripts\\python tools/make_manual.py --site "https://<ชื่อเว็บ>:8090/"   # ลิงก์ที่พิมพ์ในคู่มือ
+    .venv\\Scripts\\python tools/make_manual.py --site "http://<IP เครื่องแล็บ>:8090/"   # ที่อยู่ที่พิมพ์ในคู่มือ
 """
 
 from __future__ import annotations
@@ -376,41 +376,29 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
         doc2 = S.add_user(["test_package"], name="doc2")
         PK = S.pkg_ids["test_package"]
 
-        # ===== 2 เปิดเว็บ และเข้าสู่ระบบ =====
+        # ===== 2 เปิดเว็บ และเข้าสู่ระบบด้วยลิงก์ส่วนตัว =====
         cd = br.new_context(viewport=DESKTOP, device_scale_factor=1.5, accept_downloads=True, bypass_csp=True)
         p = cd.new_page()
         p.goto(S.url("test_package"))
         p.wait_for_selector("#loginCard:not([hidden])")
-        m.section("เปิดเว็บ และเข้าสู่ระบบ",
-                  f"ลิงก์เว็บคือ {shown} ต้องต่อ VPN ของมหาวิทยาลัยก่อน แบบเดียวกับตอนเปิด CVAT "
-                  "ทีมวิจัยจะให้ชื่อผู้ใช้และรหัสผ่านของแพทย์แต่ละคน ใส่ครั้งเดียวแล้วเบราว์เซอร์จะจำไว้ประมาณ 30 วัน "
-                  "บน iPad ให้เปิดเว็บจากไอคอนบนหน้าจอโฮมทุกครั้ง เพราะไอคอนกับ Safari เก็บข้อมูลแยกกัน")
-        p.fill("#loginUser", doc1[0])
-        p.fill("#loginPass", doc1[1])
-        m.shot(p, "เข้าสู่ระบบบนคอมพิวเตอร์",
-               "เปิดลิงก์ด้วย Chrome หรือ Edge ใส่ชื่อผู้ใช้และรหัสผ่าน (หมายเลข 1) แล้วกด **เข้าสู่ระบบ** (หมายเลข 2) "
-               "เว็บจะเปิดงานล่าสุดทันที",
-               [el("#loginUser", 1, pad=4), el("#btnLogin", 2)])
-        p.click("#btnLogin")
+        m.section("เปิดเว็บ และเข้าสู่ระบบด้วยลิงก์ส่วนตัว",
+                  "ทีมวิจัยจะส่งลิงก์ส่วนตัวให้แพทย์แต่ละคนทางแชตส่วนตัวหรืออีเมล แพทย์ไม่มีชื่อผู้ใช้หรือรหัสผ่าน "
+                  f"ต่อ VPN ของมหาวิทยาลัยก่อน แบบเดียวกับตอนเปิด CVAT ({shown}) แล้วแตะลิงก์ "
+                  "เว็บจะเข้าสู่ระบบเองและเปิดงานล่าสุด และจำการเข้าสู่ระบบไว้จนถึงวันที่ทีมกำหนด เช่น วันจบโครงการ "
+                  "ครั้งต่อไปแตะลิงก์เดิมในข้อความ หรือเปิดแท็บเดิมในเบราว์เซอร์ ก็เข้างานได้เลย "
+                  "ลิงก์นี้ห้ามส่งต่อ ถ้าลิงก์หลุด ทีมยกเลิกลิงก์เดิมและส่งลิงก์ใหม่ให้ได้")
+        m.shot(p, "หน้าที่ขึ้นเมื่อยังไม่ได้เข้าสู่ระบบ",
+               "ถ้ายังไม่ได้เข้าสู่ระบบ ให้แตะลิงก์ในข้อความ (หมายเลข 1) หรือวางลิงก์ในช่อง (หมายเลข 2)",
+               [el("#loginCard p:not(.err-text)", 1, pad=4), el("#linkInput", 2, pad=4)])
+        p.goto(S.link(doc1[1], "test_package"))
         p.wait_for_function("() => window.__marker.state.imagesReady", timeout=30000)
 
         ci = br.new_context(viewport=IPAD, device_scale_factor=2, has_touch=True, user_agent=IPAD_UA,
                             accept_downloads=True, bypass_csp=True)
         ci.add_init_script(IPAD_INIT)
         q = ci.new_page()
-        q.goto(S.url("test_package"))
-        q.wait_for_selector("#loginCard:not([hidden])")
-        q.fill("#loginUser", doc2[0])
-        m.shot(q, "เข้าสู่ระบบบน iPad",
-               "เปิดลิงก์ด้วย Safari ในแท็บปกติ ใส่ชื่อผู้ใช้และรหัสผ่าน (หมายเลข 1) เมื่อ iPad ถามให้จำรหัสผ่าน ให้กด **บันทึก**",
-               [el("#loginUser", 1, pad=4)], device="iPad")
-        q.fill("#loginPass", doc2[1])
-        q.click("#btnLogin")
+        q.goto(S.link(doc2[1], "test_package"))          # iPad: แตะลิงก์ส่วนตัว (เปิดใน Safari)
         q.wait_for_function("() => window.__marker.state.imagesReady", timeout=30000)
-        m.add_step("เพิ่มไอคอนบนหน้าจอโฮม (ภาพจำลอง)",
-                   "ใน Safari กดปุ่มแชร์ (หมายเลข 1) กด **เพิ่มไปยังหน้าจอโฮม** (หมายเลข 2) และ **เพิ่ม** "
-                   "แล้วไอคอนจะแสดงบนหน้าจอโฮม (หมายเลข 3)",
-                   mock_homescreen(br), "iPad ภาพจำลอง")
         # หน้าที่ต้องเห็นตัวภาพ ใช้ภาพจริงจากแพ็กเกจตัวอย่าง (ถ้ามีไฟล์จุดของทีม) — rp = หน้าเว็บที่เปิดแพ็กเกจตัวอย่าง
         R = " (ภาพจริง)" if marks else ""
         if marks:
@@ -693,7 +681,7 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
 
         # ===== กลับมาทำต่อ =====
         m.section("กลับมาทำต่อ และการอัปเดตเว็บ",
-                  "ครั้งต่อไปเปิดลิงก์เดิมหลังต่อ VPN เว็บจะเข้าสู่ระบบและไปที่งานล่าสุดเอง "
+                  "ครั้งต่อไปต่อ VPN แล้วแตะลิงก์ส่วนตัวเดิม หรือเปิดแท็บเดิม เว็บจะไปที่งานล่าสุดเอง "
                   "เปิดจากเครื่องอื่นด้วยบัญชีเดียวกันก็เห็นงานเดียวกัน เพราะงานอยู่บนเซิร์ฟเวอร์")
         p.close()
         p = cd.new_page()
@@ -701,20 +689,15 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
         p.wait_for_function("() => window.__marker.state.imagesReady", timeout=30000)
         p.wait_for_timeout(300)
         m.shot(p, "เปิดเว็บเพื่อทำต่อในวันอื่น",
-               "เว็บไปที่งานล่าสุดเอง (หมายเลข 1) และแสดงจำนวนงานที่ทำแล้ว (หมายเลข 2) โดยไม่ต้องเลือกไฟล์หรือใส่รหัสซ้ำ",
+               "เว็บไปที่งานล่าสุดเอง (หมายเลข 1) และแสดงจำนวนงานที่ทำแล้ว (หมายเลข 2) โดยไม่ต้องเลือกไฟล์หรือพิมพ์อะไร",
                [el("#taskLabel", 1), el("#progress", 2, at="below")])
-        con = S.con()
-        con.execute("DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)", (doc1[0],))
-        con.close()
+        new_tok = S.new_link(doc1[0])                       # ทีมส่งลิงก์ใหม่ (เช่น ลิงก์เดิมหลุด) -> เครื่องเดิมต้องเข้าใหม่
         p.evaluate("() => { const t = window.__marker.task(); t.duration_ms += 1000; t.updated_at = new Date().toISOString(); window.__marker.save(); }")
         p.wait_for_selector("#loginCard:not([hidden])", timeout=15000)
-        p.fill("#loginUser", doc1[0])
-        m.shot(p, "เมื่อเว็บขอรหัสผ่านอีกครั้ง",
-               "ประมาณเดือนละครั้งเว็บจะขอรหัสผ่านอีกครั้ง (หมายเลข 1) งานที่ยังไม่ส่งไม่หาย "
-               "ใส่รหัสแล้วกด **เข้าสู่ระบบ** (หมายเลข 2) เว็บจะส่งต่อให้เอง",
-               [el("#loginMsg", 1), el("#btnLogin", 2)])
-        p.fill("#loginPass", doc1[1])
-        p.click("#btnLogin")
+        m.shot(p, "เมื่อเว็บให้แตะลิงก์อีกครั้ง",
+               "เมื่อทีมส่งลิงก์ใหม่หรือลิงก์หมดอายุ จะขึ้นข้อความนี้ (หมายเลข 1) แตะลิงก์ล่าสุด งานที่ค้างจะส่งต่อเอง",
+               [el("#loginMsg", 1)])
+        p.goto(S.link(new_tok, "test_package"))
         p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึกแล้ว')", timeout=20000)
         # อัปเดตเว็บเอง: จำลองว่าเซิร์ฟเวอร์มีเวอร์ชันถัดไป แล้วถ่ายข้อความแจ้งก่อนเว็บโหลดใหม่ (0.8 วินาที)
         cur = re.search(r"PELNAV_VERSION = '([^']+)'", (ROOT / "marker" / "version.js").read_text(encoding="utf-8")).group(1)
@@ -763,50 +746,6 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
     return main_full
 
 
-def mock_homescreen(br) -> str:
-    """ภาพจำลอง: ปุ่มแชร์ของ Safari แล้วเพิ่มไปยังหน้าจอโฮม (ใช้ไอคอนจริงของเว็บ)"""
-    icon = "data:image/png;base64," + base64.b64encode((ROOT / "marker" / "icon-180.png").read_bytes()).decode()
-    page_html = f"""<!doctype html><html lang="th"><head><meta charset="utf-8"><style>
-    body {{ margin:0; background:#f2f2f7; font-family:'Leelawadee UI',Tahoma,sans-serif; }}
-    .wrap {{ display:flex; gap:28px; padding:26px; align-items:flex-start; }}
-    .panel {{ background:#fff; border-radius:14px; box-shadow:0 2px 10px rgba(0,0,0,.15); width:330px; padding:14px; position:relative; }}
-    .bar {{ display:flex; align-items:center; gap:10px; background:#e9e9ee; border-radius:10px; padding:8px 10px; font-size:14px; color:#333; }}
-    .url {{ flex:1; background:#fff; border-radius:8px; padding:6px 8px; color:#555; font-size:13px; }}
-    .share {{ width:30px; height:30px; display:flex; align-items:center; justify-content:center; border-radius:8px; }}
-    .menu div {{ padding:11px 12px; border-bottom:1px solid #eee; font-size:15px; }}
-    .hl {{ background:#fff1f1; font-weight:bold; }}
-    .home {{ background:linear-gradient(160deg,#3a6ea5,#6a4c93); color:#fff; height:260px; display:grid; grid-template-columns:repeat(4,64px);
-             gap:18px; padding:20px; border-radius:14px; }}
-    .app {{ text-align:center; font-size:11px; }} .app i {{ display:block; width:60px; height:60px; border-radius:14px; background:#fff3; margin:0 auto 4px; }}
-    .app img {{ width:60px; height:60px; border-radius:14px; display:block; margin:0 auto 4px; }}
-    .n {{ position:absolute; width:28px; height:28px; border-radius:50%; background:#e60000; color:#fff; font:bold 16px/28px Tahoma;
-          text-align:center; box-shadow:0 0 0 2px #fff; }}
-    .ring {{ position:absolute; border:3px solid #e60000; border-radius:8px; }}
-    h4 {{ margin:0 0 10px; font-size:15px; }} .tag {{ font-size:12px; color:#555; }}
-    </style></head><body><div class="wrap">
-    <div class="panel"><h4>Safari</h4>
-      <div class="bar"><span class="url">witsarut17.github.io/landmark-marker/</span>
-        <span class="share"><svg width="22" height="26" viewBox="0 0 22 26"><path d="M11 2v14M6 7l5-5 5 5" stroke="#007aff" stroke-width="2.2" fill="none"/><rect x="2" y="10" width="18" height="14" rx="3" stroke="#007aff" stroke-width="2.2" fill="none"/></svg></span></div>
-      <div class="ring" style="left:284px;top:46px;width:38px;height:38px"></div><div class="n" style="left:300px;top:24px">1</div>
-      <div class="menu" style="margin-top:14px"><div>คัดลอก</div><div>เพิ่มบุ๊กมาร์ก</div><div class="hl">เพิ่มไปยังหน้าจอโฮม</div><div>พิมพ์</div></div>
-      <div class="ring" style="left:12px;top:175px;width:306px;height:42px"></div><div class="n" style="left:300px;top:160px">2</div>
-      <div class="tag" style="margin-top:10px">ภาพจำลอง ไม่ใช่ภาพหน้าจอจริง ตำแหน่งปุ่มอาจต่างกันตามรุ่นของ iPadOS</div>
-    </div>
-    <div class="panel" style="width:380px"><h4>หน้าจอโฮมของ iPad</h4>
-      <div class="home"><div class="app"><i></i>ไฟล์</div><div class="app"><i></i>Safari</div><div class="app"><i></i>รูปภาพ</div>
-        <div class="app"><img src="{icon}">PelNav Marker</div></div>
-      <div class="ring" style="left:278px;top:60px;width:76px;height:92px"></div><div class="n" style="left:340px;top:46px">3</div>
-    </div></div></body></html>"""
-    ctx = br.new_context(viewport={"width": 820, "height": 380}, device_scale_factor=2)
-    pg = ctx.new_page()
-    pg.set_content(page_html)
-    pg.wait_for_timeout(200)
-    name = "00_mock_home.jpg"
-    pg.screenshot(path=str(SHOTS / name), type="jpeg", quality=88)
-    ctx.close()
-    return name
-
-
 # ---------------------------------------------------------------- เนื้อหา
 BUTTONS = [
     ("1", "T006 / 6", "รหัสงานที่กำลังทำ และจำนวนงานทั้งหมด"),
@@ -839,8 +778,9 @@ BUTTON_TABLE = ('<table class="btns"><tr><th>หมายเลข</th><th>ป�
 OVERVIEW_1 = ("เว็บมาร์กจุดอ้างอิงใช้ให้ศัลยแพทย์วางจุดอ้างอิงที่ตรงกัน 4 คู่ บนภาพเอกซเรย์ก่อนผ่าตัดและภาพฟลูออโรสโคปีระหว่างผ่าตัด "
               "ของผู้ป่วยรายเดียวกันทีละงาน ในชุดทดสอบ 70 ราย จุดอ้างอิงที่ได้ใช้เป็นค่าอ้างอิงในการวัดความแม่นยำของวิธีจัดวางภาพในงานวิจัย "
               "และงานส่วนหนึ่งจะแสดงซ้ำโดยไม่แจ้ง เพื่อใช้วัดความสม่ำเสมอของแพทย์")
-OVERVIEW_2 = ("ภาพเก็บบนเซิร์ฟเวอร์ของโครงการในห้องปฏิบัติการ แพทย์เปิดผ่าน VPN ของมหาวิทยาลัยด้วยบัญชีและรหัสผ่านของตนเอง "
-              "การเชื่อมต่อเข้ารหัส และไม่เปิดให้บุคคลทั่วไปเข้าถึง ภาพไม่ถูกบันทึกลงเครื่องของแพทย์ "
+OVERVIEW_2 = ("ภาพเก็บบนเซิร์ฟเวอร์ของโครงการในห้องปฏิบัติการ แพทย์เปิดผ่าน VPN ของมหาวิทยาลัย แบบเดียวกับที่ห้องปฏิบัติการใช้กับ CVAT "
+              "เซิร์ฟเวอร์รับเฉพาะเครื่องในเครือข่ายภายในของมหาวิทยาลัย ไม่เปิดให้บุคคลทั่วไปเข้าถึง "
+              "แพทย์เข้าสู่ระบบด้วยลิงก์ส่วนตัวที่ทีมวิจัยส่งให้ ไม่ต้องพิมพ์รหัสผ่าน ภาพไม่ถูกบันทึกลงเครื่องของแพทย์ "
               "จุดที่วางบันทึกขึ้นเซิร์ฟเวอร์ทุกครั้งโดยอัตโนมัติ แพทย์จึงไม่ต้องเลือกไฟล์ สำรอง หรือส่งไฟล์ "
               "ผลที่ได้มีเพียงรหัสงานและตำแหน่งจุดเท่านั้น")
 OVERVIEW_NOTE = ("ภาพหน้าจอทั้งหมดในคู่มือนี้ใช้ภาพทดสอบที่สร้างขึ้น ไม่ใช่ภาพผู้ป่วย "
@@ -849,16 +789,16 @@ OVERVIEW_NOTE_REAL = ("ภาพหน้าจอที่มีคำว่า
                       "ภาพหน้าจออื่นใช้ภาพทดสอบที่สร้างขึ้น ไม่ใช่ภาพผู้ป่วย และเลขในวงกลมสีแดงตรงกับคำอธิบายใต้ภาพ")
 
 TRYOUT_INTRO = ("อาจารย์ทดลองใช้เว็บได้เองด้วยชุดภาพทดสอบ ภาพในชุดนี้สร้างขึ้นเพื่อการทดสอบ ไม่ใช่ภาพผู้ป่วย "
-                "ทีมวิจัยจะสร้างบัญชีทดลองบนเซิร์ฟเวอร์และกำหนดชุดภาพทดสอบให้")
+                "ทีมวิจัยจะสร้างบัญชีทดลองบนเซิร์ฟเวอร์ กำหนดชุดภาพทดสอบให้ และส่งลิงก์ส่วนตัวของบัญชีทดลองให้")
 TRYOUT_STEPS = [
-    "ต่อ VPN แล้วเปิดลิงก์เว็บ ใส่ชื่อผู้ใช้และรหัสผ่านของบัญชีทดลองที่ทีมวิจัยให้",
+    "ต่อ VPN แล้วแตะลิงก์ส่วนตัวของบัญชีทดลอง เว็บต้องเปิดงาน T001 เองโดยไม่ต้องพิมพ์อะไร",
     "ในงาน T001 ถึง T005 ภาพมีกากบาทพร้อมตัวเลขตำแหน่งที่ถูกต้อง เช่น 1 (100,200) ให้วางจุดที่กลางกากบาท "
     "แล้วคลิกที่จุดเพื่อดูตำแหน่งด้านบนภาพ ตำแหน่งควรคลาดไม่เกิน 1 จึงใช้ตรวจความแม่นยำของการวางจุดได้",
     "ในงาน T006 ภาพฟลูออโรสโคปีเป็นบริเวณในกรอบที่ขยาย หมุน และกลับสี ให้ลองวาง 4 คู่ที่กากบาทที่ตรงกันในทั้งสองภาพ",
     "ลองกด **มาร์กไม่ได้** ลองวาง 3 คู่แล้วกด **ถัดไป** ลองบันทึก **หมายเหตุ** และลองกด **ปรับภาพ**",
     "ลองกด **ข้ามไปก่อน** 1 งาน แล้วทำงานที่เหลือให้เสร็จ เว็บต้องพากลับไปงานที่ข้ามเอง "
     "และลองพิมพ์เลขงานในช่อง **ไปที่งาน**",
-    "ปิดแท็บระหว่างทำงาน แล้วเปิดลิงก์ใหม่ เว็บต้องกลับไปงานเดิมและจุดต้องอยู่ครบ "
+    "ปิดแท็บระหว่างทำงาน แล้วแตะลิงก์ส่วนตัวอีกครั้ง เว็บต้องกลับไปงานเดิมและจุดต้องอยู่ครบ "
     "ลองเปิดจากอีกเครื่องด้วยบัญชีเดียวกันก็ต้องเห็นงานเดียวกัน",
     "ลองปิด Wi-Fi ระหว่างทำ แถบด้านบนต้องขึ้นว่ายังไม่ได้ส่ง เมื่อเปิด Wi-Fi และ VPN อีกครั้ง ต้องกลับมาเป็น บันทึกแล้ว",
     "กด **พักงาน** ต้องขึ้นว่าบันทึกบนเซิร์ฟเวอร์ครบแล้ว",
