@@ -964,7 +964,8 @@
       viewers.xray.setImage(x.img, x.W, x.H);
       viewers.fluoro.setImage(f.img, f.W, f.H);
       fitXrayToBox();
-      state.fluoroArea = estimateFilledArea(f.img, f.W, f.H);
+      // พื้นที่วงกลมฟลู: แพ็กเกจภาพต้นฉบับให้ค่ามาใน manifest (ต้นฉบับไม่ได้ทาดำรอบวงกลม) · ไม่มี = ประมาณจากส่วนที่ไม่ดำ
+      state.fluoroArea = (typeof item.fluoro_area === 'number' && item.fluoro_area > 0) ? item.fluoro_area : estimateFilledArea(f.img, f.W, f.H);
       state.imagesReady = true;
       refreshMarks();
       prefetchAround(i);
