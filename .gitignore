@@ -44,6 +44,7 @@ splits*.csv
 tools/private_terms.txt
 # ตำแหน่งโฟลเดอร์ข้อมูลจริงในเครื่องนี้
 tools/data_root.txt
+tools/orig_root.txt
 # กลุ่มเคสที่สงสัยว่าเป็นผู้ป่วยคนเดียวกัน (มีรหัสเคส)
 tools/same_patient_groups.txt
 
