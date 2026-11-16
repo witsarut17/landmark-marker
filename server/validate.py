@@ -115,6 +115,9 @@ def load_manifest(pkg_dir: Path) -> tuple[dict, str]:
         b = it.get("box_xyxy")
         if not (isinstance(b, list) and len(b) == 4 and all(_num(v) for v in b)):
             raise Invalid(f"{tid}: box_xyxy ผิด")
+        fa = it.get("fluoro_area")          # ไม่บังคับ: พื้นที่วงกลมฟลู (แพ็กเกจภาพต้นฉบับ ซึ่งไม่ได้ทาดำรอบวงกลม)
+        if fa is not None and not (_num(fa) and 0 < fa <= it["fluoro_size"][0] * it["fluoro_size"][1]):
+            raise Invalid(f"{tid}: fluoro_area ผิด")
     return m, hashlib.sha256(raw).hexdigest()
 
 
@@ -129,5 +132,6 @@ def public_manifest(m: dict) -> dict:
             "xray_size": it["xray_size"], "fluoro_size": it["fluoro_size"],
             "box_xyxy": it["box_xyxy"], "is_repeat_of": it.get("is_repeat_of"),
             **({"rotation": it["rotation"]} if "rotation" in it else {}),
+            **({"fluoro_area": it["fluoro_area"]} if it.get("fluoro_area") is not None else {}),
         })
     return {"package_id": m["package_id"], "items": items}

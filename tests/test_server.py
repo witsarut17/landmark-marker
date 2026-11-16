@@ -275,6 +275,31 @@ def run(tmp: Path):
     run_manage(tmp, cfg, app, m)
     close_logs()
     run_networks(tmp)
+    run_fluoro_area(tmp)
+
+
+def run_fluoro_area(tmp: Path):
+    """F: fluoro_area ใน manifest (แพ็กเกจภาพต้นฉบับ) — ไม่บังคับ · ค่าผิด = ไม่รับแพ็กเกจ · ส่งต่อให้หน้าเว็บ"""
+    from server.validate import Invalid, public_manifest
+    d = tmp / "pkg_area"
+    shutil.copytree(PKG, d)
+    base = json.loads((PKG / "manifest.json").read_text(encoding="utf-8"))
+
+    def with_area(v):
+        m = json.loads(json.dumps(base))
+        m["items"][0]["fluoro_area"] = v
+        (d / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+        try:
+            return load_manifest(d)[0]
+        except Invalid:
+            return None
+    W, H = base["items"][0]["fluoro_size"]
+    good = with_area(int(W * H * 0.6))
+    check(good is not None and public_manifest(good)["items"][0]["fluoro_area"] == int(W * H * 0.6)
+          and "fluoro_area" not in public_manifest(load_manifest(PKG)[0])["items"][0],
+          "F fluoro_area ถูกต้อง → รับ และส่งให้หน้าเว็บ · แพ็กเกจที่ไม่มีค่านี้ใช้ได้เหมือนเดิม")
+    check(all(with_area(v) is None for v in (0, -5, W * H + 1, "x", True)),
+          "F fluoro_area ผิด (0, ติดลบ, เกินพื้นที่ภาพ, ไม่ใช่ตัวเลข) → ไม่รับแพ็กเกจ")
 
 
 def run_links(app, cfg, m, tok):

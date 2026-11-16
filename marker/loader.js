@@ -79,6 +79,10 @@
         if (b[0] < 0 || b[1] < 0 || b[2] > W || b[3] > H) errors.push(`${at}: box_xyxy เกินขอบภาพเอกซเรย์`);
       }
       if (it.rotation !== undefined && !isNum(it.rotation)) errors.push(`${at}: rotation ต้องเป็นตัวเลข`);
+      if (it.fluoro_area != null) {          // ไม่บังคับ (แพ็กเกจภาพต้นฉบับ): พื้นที่วงกลมฟลู ต้องไม่เกินพื้นที่ภาพ
+        const fs = Array.isArray(it.fluoro_size) ? it.fluoro_size[0] * it.fluoro_size[1] : 0;
+        if (!isNum(it.fluoro_area) || !(it.fluoro_area > 0) || (fs && it.fluoro_area > fs)) errors.push(`${at}: fluoro_area ไม่ถูกต้อง`);
+      }
     });
     m.items.forEach((it, i) => {
       if (it && it.is_repeat_of != null && !ids.has(it.is_repeat_of)) errors.push(`items[${i}]: is_repeat_of อ้างถึงงานที่ไม่มี`);
