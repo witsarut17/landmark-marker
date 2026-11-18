@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
+import ipaddress
 import json
 import re
 import shutil
@@ -69,7 +70,7 @@ GUIDE = r"""# คู่มือติดตั้งเว็บมาร์ก
 
 ## ขั้นที่ 3: รันตัวติดตั้ง
 1. คลิกขวาปุ่ม Start → **Terminal (Admin)** แล้วพิมพ์: `powershell -ExecutionPolicy Bypass -File C:\PelNav\app\server\windows\install.ps1 -LabIp {ip}`
-2. ตัวติดตั้งทำเอง: ตรวจพอร์ต {port} ว่าง · ติดตั้งโปรแกรมเสริม · สร้างฐานข้อมูล `C:\PelNav\data` · ไฟร์วอลล์รับเฉพาะเครือข่าย 10.x · ไม่ให้เครื่องหลับ · เริ่มเองเมื่อเปิดเครื่อง (ไม่แตะ CVAT)
+2. ตัวติดตั้งทำเอง: ตรวจพอร์ต {port} ว่าง · ติดตั้งโปรแกรมเสริม · สร้างฐานข้อมูล `C:\PelNav\data` · ไฟร์วอลล์รับเฉพาะเครือข่ายภายใน (10.x, 172.16–31.x, 192.168.x) · ไม่ให้เครื่องหลับ · เริ่มเองเมื่อเปิดเครื่อง (ไม่แตะ CVAT)
 - ✔ **ตรวจ:** บรรทัดท้ายขึ้น `หมอเปิดผ่าน VPN ที่: {lab}` · รอ 20 วินาที แล้วเปิด `http://127.0.0.1:{port}/api/health` ในเครื่องนี้ → ขึ้น `"ok": true`
 - ข้อความสีแดง / ไม่ขึ้น ok → ถ่ายภาพหน้าจอส่งทีม (ดู `C:\PelNav\data\logs\service.log`)
 
@@ -100,7 +101,7 @@ GUIDE = r"""# คู่มือติดตั้งเว็บมาร์ก
 3. เปิดลิงก์ของ test1 → ✔ เว็บเปิดงาน T001 เอง (ภาพทดสอบมีกากบาท) · วางจุด 1 จุด → มุมขวาบนขึ้น "บันทึกแล้ว"
 4. เปิด `{lab}admin.html` → เข้าด้วย team1 + รหัส → ✔ มีแถว test1
 5. ปิดบัญชีทดสอบ: `m disable-user test1`
-- ข้อ 2 เปิดไม่ได้ ทั้งที่ CVAT (`{cvat_url}`) เปิดได้ → ส่งบรรทัด "ปฏิเสธคำขอ" ใน `C:\PelNav\data\logs\app.log` ให้ทีม (VPN อาจให้ IP ที่ไม่ขึ้นต้นด้วย 10.)
+- ข้อ 2 เปิดไม่ได้ ทั้งที่ CVAT (`{cvat_url}`) เปิดได้ → ส่งบรรทัด "ปฏิเสธคำขอ" ใน `C:\PelNav\data\logs\app.log` ให้ทีม (บรรทัดนั้นมีเลข IP ที่ถูกปฏิเสธ · VPN อาจให้ IP นอกเครือข่ายภายใน)
 
 ## ขั้นที่ 7: บัญชีแพทย์จริง (ทีมทำผ่านรีโมต หรือผู้ติดตั้งรันแล้วส่งลิงก์ให้ทีมทางช่องทางส่วนตัว)
 ต่อแพทย์ 1 คน (เปลี่ยน `doc1` เป็นชื่อบัญชีที่ทีมกำหนด):
@@ -160,15 +161,20 @@ def main():
     ap.add_argument("--test-package", default=str(PROJECT / "tests" / "generated" / "test_package"))
     ap.add_argument("--out", default=r"C:\PelNav_private\handover")
     ap.add_argument("--overwrite", action="store_true")
+    ap.add_argument("--guide-only", action="store_true",
+                    help="สร้างเฉพาะคู่มือใหม่ ใช้ zip เดิมใน --out (ตรวจซ้ำว่าตรงกับแพ็กเกจ) — ไม่ต้องอัปโหลด zip ใหม่")
     args = ap.parse_args()
 
-    m = re.fullmatch(r"http://(10\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)/?", args.lab_url.strip())
-    if not m:
-        sys.exit("--lab-url ต้องเป็น http://10.x.x.x:พอร์ต/ (เครือข่ายภายใน)")
+    m = re.fullmatch(r"http://(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)/?", args.lab_url.strip())
+    if not m or not ipaddress.ip_address(m.group(1)).is_private:
+        sys.exit("--lab-url ต้องเป็น http://<IP ภายใน>:พอร์ต/ (เครือข่ายภายใน)")
     ip, port = m.group(1), m.group(2)
     lab = f"http://{ip}:{port}/"
     out = safe_out_dir(Path(args.out))
-    if out.exists() and any(out.iterdir()) and not args.overwrite:
+    if args.guide_only:
+        if not ((out / "orig_package.zip").is_file() and (out / "test_package.zip").is_file()):
+            sys.exit(f"--guide-only: ไม่พบ zip เดิมใน {out}")
+    elif out.exists() and any(out.iterdir()) and not args.overwrite:
         sys.exit(f"มี {out} อยู่แล้ว — ใส่ --overwrite ถ้าจะสร้างใหม่")
 
     # โค้ด: commit ล่าสุดบน GitHub · โปรแกรมที่ใช้บนเครื่องแล็บ (server/, marker/) ในเครื่องนี้ต้องตรงกับบน GitHub
@@ -184,21 +190,28 @@ def main():
     if pkg.name != "orig_package" or tpkg.name != "test_package":
         sys.exit("ชื่อโฟลเดอร์แพ็กเกจต้องเป็น orig_package และ test_package (คู่มืออ้างชื่อนี้)")
 
-    if out.exists():
-        shutil.rmtree(out)
-    out.mkdir(parents=True)
     tmp = out.parent / "_handover_verify"
-
-    # test_package.zip (ภาพสังเคราะห์) · orig_package.zip (ไม่มีรหัส · ไม่บีบอัด เพราะภาพ JPEG/PNG บีบอัดอยู่แล้ว)
-    tpath = out / "test_package.zip"
-    tfiles = zip_folder(tpkg, tpath, zipfile.ZIP_DEFLATED)
-    opath = out / "orig_package.zip"
-    print("กำลังสร้าง orig_package.zip …", flush=True)
-    files = zip_folder(pkg, opath, zipfile.ZIP_STORED)
+    tpath, opath = out / "test_package.zip", out / "orig_package.zip"
+    if args.guide_only:
+        # ใช้ zip เดิม (ผู้ติดตั้งอาจดาวน์โหลดไปแล้ว) · ลบเฉพาะคู่มือเดิม
+        for p in out.glob("คู่มือติดตั้ง.*"):
+            p.unlink()
+        tfiles = sorted(p for p in tpkg.iterdir() if p.is_file())
+        files = sorted(p for p in pkg.iterdir() if p.is_file())
+        print("ใช้ zip เดิม — ตรวจซ้ำว่าตรงกับแพ็กเกจ …", flush=True)
+    else:
+        if out.exists():
+            shutil.rmtree(out)
+        out.mkdir(parents=True)
+        # test_package.zip (ภาพสังเคราะห์) · orig_package.zip (ไม่มีรหัส · ไม่บีบอัด เพราะภาพ JPEG/PNG บีบอัดอยู่แล้ว)
+        tfiles = zip_folder(tpkg, tpath, zipfile.ZIP_DEFLATED)
+        print("กำลังสร้าง orig_package.zip …", flush=True)
+        files = zip_folder(pkg, opath, zipfile.ZIP_STORED)
     for zp, fl in ((tpath, tfiles), (opath, files)):
         n_out, bad = verify_zip(zp, fl, tmp)
         if bad or n_out != len(fl):
-            zp.unlink(missing_ok=True)
+            if not args.guide_only:
+                zp.unlink(missing_ok=True)
             sys.exit(f"หยุด: ตรวจ {zp.name} ไม่ผ่าน (ไม่ตรง {len(bad)}, จำนวน {n_out}/{len(fl)})")
 
     sha = sha256_file(opath).upper()
@@ -210,7 +223,8 @@ def main():
                       cvat_url=args.cvat_url or "CVAT ของแล็บ")
     (out / "คู่มือติดตั้ง.md").write_text(md, encoding="utf-8")
     pages = render_pdf(md, out / "คู่มือติดตั้ง.html", out / "คู่มือติดตั้ง.pdf")
-    (out / "ข้อมูลชุดส่งมอบ.json").write_text(json.dumps({
+    # บันทึกของทีม (ไม่ส่งให้ผู้ติดตั้ง) → เก็บนอกโฟลเดอร์ส่งมอบ ข้าง orig_key.csv
+    (out.parent / "ข้อมูลชุดส่งมอบ.json").write_text(json.dumps({
         "package_id": man["package_id"], "tasks": len(man["items"]), "files": len(files), "orig_package_zip_sha256": sha,
         "orig_package_zip_bytes": opath.stat().st_size, "test_package_zip_bytes": tpath.stat().st_size,
         "code_commit": head, "code_url": code_url, "lab_url": lab}, indent=1, ensure_ascii=False), encoding="utf-8")
