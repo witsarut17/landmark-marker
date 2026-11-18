@@ -377,7 +377,7 @@ def run_links(app, cfg, m, tok):
 
 
 def run_networks(tmp: Path):
-    """N: รับเฉพาะคำขอจากเครือข่ายที่อนุญาต (ค่าเริ่มต้น 10.x + เครื่องตัวเอง)"""
+    """N: รับเฉพาะคำขอจากเครือข่ายที่อนุญาต (ค่าเริ่มต้น เครือข่ายภายในทุกช่วง + เครื่องตัวเอง)"""
     def app_with(extra: str, sub: str):
         close_logs()
         d = tmp / sub
@@ -391,23 +391,30 @@ def run_networks(tmp: Path):
     app, cfg = app_with("", "net_default")
     c = app.test_client()
     code = lambda ip, path="/api/health": c.get(path, environ_base={"REMOTE_ADDR": ip}).status_code  # noqa: E731
-    check(cfg.allowed_networks == ["10.0.0.0/8", "127.0.0.0/8", "::1/128"], "N ค่าเริ่มต้น: 10.x + เครื่องตัวเอง", cfg.allowed_networks)
-    check(code("10.20.30.40") == 200 and code("10.0.0.1") == 200 and code("127.0.0.1") == 200 and code("::1") == 200,
-          "N เครือข่ายภายใน (10.x) และเครื่องตัวเอง → เข้าได้")
-    blocked = [code(ip) for ip in ("192.168.1.5", "172.16.0.9", "8.8.8.8", "11.0.0.1", "::ffff:8.8.8.8", "2001:db8::1")]
-    check(all(x == 403 for x in blocked), "N ที่อื่น (Wi-Fi บ้าน 192.168.x, อินเทอร์เน็ต, IPv6) → 403", blocked)
-    r = c.get("/api/health", environ_base={"REMOTE_ADDR": "192.168.1.5"})
-    check("VPN" in r.get_json()["error"] and code("192.168.1.5", "/") == 403 and code("192.168.1.5", "/admin.html") == 403
-          and c.post("/api/link-login", json={"token": "x"}, headers=H, environ_base={"REMOTE_ADDR": "192.168.1.5"}).status_code == 403,
-          "N ที่อื่นเปิดหน้าเว็บ/หน้าทีม/ลิงก์ไม่ได้ · ข้อความบอกให้ต่อ VPN", r.get_json())
-    check(code("::ffff:10.1.1.1") == 200, "N 10.x ในรูป IPv6 (::ffff:10.x) → เข้าได้")
+    check(cfg.allowed_networks == ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128"],
+          "N ค่าเริ่มต้น: เครือข่ายภายในทุกช่วง (10.x, 172.16–31.x, 192.168.x) + เครื่องตัวเอง", cfg.allowed_networks)
+    inside = [code(ip) for ip in ("10.20.30.40", "10.0.0.1", "172.16.0.9", "172.31.255.254", "192.168.1.5", "192.168.255.1",
+                                  "127.0.0.1", "::1", "::ffff:10.1.1.1", "::ffff:192.168.0.7")]
+    check(all(x == 200 for x in inside), "N เครือข่ายภายในทุกช่วง (รวมแบบ IPv6 ::ffff:) และเครื่องตัวเอง → เข้าได้", inside)
+    out_ips = ("8.8.8.8", "11.0.0.1", "172.15.255.255", "172.32.0.1", "192.169.0.1", "100.64.0.5", "::ffff:8.8.8.8", "2001:db8::1")
+    blocked = [code(ip) for ip in out_ips]
+    check(all(x == 403 for x in blocked), "N นอกเครือข่ายภายใน (อินเทอร์เน็ต, ขอบช่วง 172.15/172.32/192.169, 100.64, IPv6) → 403", blocked)
+    r = c.get("/api/health", environ_base={"REMOTE_ADDR": "8.8.8.8"})
+    check("VPN" in r.get_json()["error"] and code("8.8.8.8", "/") == 403 and code("8.8.8.8", "/admin.html") == 403
+          and c.post("/api/link-login", json={"token": "x"}, headers=H, environ_base={"REMOTE_ADDR": "8.8.8.8"}).status_code == 403,
+          "N นอกเครือข่ายเปิดหน้าเว็บ/หน้าทีม/ลิงก์ไม่ได้ · ข้อความบอกให้ต่อ VPN", r.get_json())
     for h in logging.getLogger("pelnav").handlers:
         h.flush()
-    check("ปฏิเสธคำขอจากนอกเครือข่าย" in (cfg.logs / "app.log").read_text(encoding="utf-8"),
-          "N log บันทึก IP ที่ถูกปฏิเสธ (ไว้ตรวจปัญหา VPN)")
-    app2, _ = app_with('allowed_networks = ["10.0.0.0/8", "192.168.0.0/16"]\n', "net_home")
-    check(app2.test_client().get("/api/health", environ_base={"REMOTE_ADDR": "192.168.1.5"}).status_code == 200,
-          "N เพิ่มช่วง IP ใน config.toml ได้ (เช่น ทดสอบ iPad ผ่าน Wi-Fi บ้าน)")
+    logtxt = (cfg.logs / "app.log").read_text(encoding="utf-8")
+    denied = [ln for ln in logtxt.splitlines() if "ปฏิเสธคำขอจากนอกเครือข่าย" in ln]
+    check(all(any(f"ip={ip} " in ln for ln in denied) for ip in out_ips) and any("path=/admin.html" in ln for ln in denied)
+          and not any("ip=192.168.1.5 " in ln for ln in denied),
+          "N log บันทึกเลข IP และหน้าที่ถูกปฏิเสธทุกครั้ง (ไว้ดูว่าหมอเข้าจาก IP ไหน) · IP ภายในไม่ถูกบันทึกว่าปฏิเสธ", denied[:2])
+    app2, _ = app_with('allowed_networks = ["10.0.0.0/8", "100.64.0.0/10"]\n', "net_custom")
+    c2 = app2.test_client()
+    check(c2.get("/api/health", environ_base={"REMOTE_ADDR": "100.64.0.5"}).status_code == 200
+          and c2.get("/api/health", environ_base={"REMOTE_ADDR": "192.168.1.5"}).status_code == 403,
+          "N กำหนดช่วงเองใน config.toml ได้ (เช่น VPN ที่ใช้ 100.64.x) · ช่วงที่ไม่ได้ใส่ → ปฏิเสธ")
     try:
         app_with('allowed_networks = ["10.0.0.0/33"]\n', "net_bad")
         bad_ok = False

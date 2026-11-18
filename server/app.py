@@ -1,6 +1,7 @@
 """เว็บแอป Flask: หน้าเว็บมาร์กจุด + API (เข้าสู่ระบบ, manifest, ภาพ, บันทึกจุด, ข้อมูลสำหรับทีม)
 
-ความปลอดภัย: รับเฉพาะคำขอจากเครือข่ายที่อนุญาต (allowed_networks ค่าเริ่มต้น 10.x + เครื่องตัวเอง),
+ความปลอดภัย: รับเฉพาะคำขอจากเครือข่ายที่อนุญาต (allowed_networks ค่าเริ่มต้น = เครือข่ายภายในทุกช่วง + เครื่องตัวเอง
+· IP ที่ถูกปฏิเสธบันทึกใน log),
 หมอเข้าด้วยลิงก์ส่วนตัว (POST /api/link-login) · ทีมเข้าด้วยรหัสผ่าน (POST /api/login),
 session ฝั่งเซิร์ฟเวอร์ (คุกกี้ HttpOnly + SameSite=Strict + Secure เมื่อใช้ HTTPS),
 คำขอที่เปลี่ยนข้อมูลต้องมี header X-Requested-With: pelnav และ Origin ตรงกับเว็บนี้,
@@ -29,7 +30,8 @@ from .validate import FINAL, IMG_EXT, Invalid, clean_task, load_manifest, public
 COOKIE = "pelnav_session"
 CSRF_HEADER = ("X-Requested-With", "pelnav")
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_NETWORKS = ["10.0.0.0/8", "127.0.0.0/8", "::1/128"]     # เครือข่ายภายในมหาวิทยาลัย/VPN (10.x) + เครื่องตัวเอง
+# เครือข่ายภายใน (private) ทุกช่วง เพราะไม่รู้แน่ว่า VPN ของมหาวิทยาลัยให้ IP ช่วงไหน + เครื่องตัวเอง
+DEFAULT_NETWORKS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128"]
 
 
 @dataclass
@@ -176,7 +178,7 @@ def create_app(cfg: Config) -> Flask:
     def _before():
         g.t0 = time.perf_counter()
         if not ip_allowed(client_ip()):
-            log.warning("ปฏิเสธคำขอจากนอกเครือข่ายที่อนุญาต ip=%s", client_ip())
+            log.warning("ปฏิเสธคำขอจากนอกเครือข่ายที่อนุญาต ip=%s path=%s", client_ip(), request.path)
             abort(403, description="เข้าได้เฉพาะจากเครือข่ายภายในของมหาวิทยาลัย — ต่อ VPN ก่อน")
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             if request.headers.get(CSRF_HEADER[0]) != CSRF_HEADER[1]:
