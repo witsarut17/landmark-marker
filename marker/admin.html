@@ -43,6 +43,22 @@
     </table>
     <div class="small muted">ไฟล์มีเพียงรหัสงาน พิกัด สถานะ และเวลา ไม่มีภาพหรือข้อมูลผู้ป่วย · อ่าน CSV ด้วย pandas: <code>pd.read_csv(path, comment='#', encoding='utf-8-sig')</code></div>
   </div>
+  <div class="card" id="studyCard" hidden>
+    <div class="admin-top">
+      <h2 class="small-h">การศึกษา: ทีมมาร์กก่อน · หมอตรวจ</h2>
+      <a class="btn btn-primary" id="btnMark" href="./" hidden>มาร์กจุด (โหมดทีม)</a>
+    </div>
+    <div class="small" id="studySummary"></div>
+    <div class="row">
+      <a class="btn btn-small" id="btnStudyCsv" href="/api/admin/study-export?format=csv">ดาวน์โหลด CSV วิเคราะห์</a>
+      <a class="btn btn-small" id="btnStudyJson" href="/api/admin/study-export?format=json">ดาวน์โหลด JSON (พร้อมประวัติ)</a>
+    </div>
+    <table class="prog">
+      <thead><tr><th>เคส</th><th>คู่</th><th>ผู้มาร์ก</th><th>ทีมมาร์ก</th><th>หมอตรวจ</th></tr></thead>
+      <tbody id="studyRows"></tbody>
+    </table>
+    <div class="small muted">CSV: 1 แถวต่อ (งาน, หมอ) · จับคู่กับ orig_key.csv ด้วย task_id · ระยะที่หมอแก้: เอกซเรย์เป็น % ของเส้นทแยงกรอบ ฟลูเป็น % ของเส้นผ่านศูนย์กลางวงกลมฟลู</div>
+  </div>
   <div class="err-text" id="pageErr"></div>
 </div>
 <script src="exporter.js"></script>

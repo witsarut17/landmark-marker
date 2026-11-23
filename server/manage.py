@@ -14,6 +14,13 @@
   backup-now                   สำรองฐานข้อมูลทันที
   export-json <ชื่อ> <package_id> <ไฟล์>   ส่งออกผลรูปแบบเดียวกับไฟล์สำรองของเว็บ
 
+การศึกษาแบบ ทีมมาร์ก-หมอตรวจ (v1.3):
+  set-study <study.json>       ตั้งนิยามการศึกษา (เคส 1–70, ผู้มาร์ก, คู่วัดความตรงกัน) — สร้างด้วย tools/make_study_plan.py
+  study                        ดูนิยามและความคืบหน้า (ทีมมาร์ก / หมอตรวจ)
+  export-marks <ไฟล์>           ส่งออกจุดของทีม (ผู้มาร์กทุกคน + ประวัติ + นิยามการศึกษา) ไว้ย้ายไปเครื่องแล็บ
+  import-marks <ไฟล์> [--replace]  นำเข้าจุดของทีม + ตั้งนิยามการศึกษา (สร้างบัญชีทีมที่ยังไม่มีให้)
+  export-study <ไฟล์.csv|.json>  ไฟล์วิเคราะห์ (จุดของทีม จุดสุดท้ายของหมอ สถานะการตรวจ ระยะที่แก้ต่อจุด)
+
 ทุกคำสั่งรับ --config <ไฟล์> (ค่าเริ่มต้น server_data/config.toml)
 """
 
@@ -27,10 +34,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import auth
+from . import study as studymod
 from .app import ROOT, Config, create_app, setup_logging
 from .backup import BackupThread, backup_now, rotate
 from .db import connect, init_db, now_iso
-from .validate import FINAL, Invalid, load_manifest
+from .validate import FINAL, Invalid, clean_task, load_manifest
 
 DEFAULT_CONFIG = ROOT / "server_data" / "config.toml"
 CONFIG_TEMPLATE = """# ตั้งค่าเซิร์ฟเวอร์เว็บมาร์กจุด — ไฟล์นี้ห้ามขึ้น GitHub (อยู่ในโฟลเดอร์ข้อมูล)
@@ -264,6 +272,176 @@ def cmd_export_json(args):
     print(f"ส่งออก {doc['completed_tasks']}/{doc['total_tasks']} งาน → {args.out}")
 
 
+# ---------------------------------------------------------------- การศึกษา ทีมมาร์ก-หมอตรวจ
+MARKS_FORMAT = "pelnav-team-marks"
+
+
+def package_manifest(con, package_id: str) -> dict:
+    row = con.execute("SELECT path FROM packages WHERE package_id = ?", (package_id,)).fetchone()
+    if not row:
+        sys.exit(f"ยังไม่ได้ลงทะเบียนแพ็กเกจ {package_id} (ใช้ add-package ก่อน)")
+    try:
+        return load_manifest(Path(row["path"]))[0]
+    except (Invalid, OSError, ValueError) as e:
+        sys.exit(f"เปิดแพ็กเกจ {package_id} ไม่ได้: {e}")
+
+
+def apply_study(con, st: dict) -> list[str]:
+    m = package_manifest(con, st.get("package_id", ""))
+    try:
+        warn = studymod.validate_study(st, m)
+    except studymod.StudyError as e:
+        sys.exit(f"หยุด: นิยามการศึกษาไม่ถูกต้อง — {e}")
+    studymod.save_study(con, st)
+    return warn
+
+
+def cmd_set_study(args):
+    cfg = load(args)
+    con = connect(cfg.db)
+    st = json.loads(Path(args.file).read_text(encoding="utf-8-sig"))
+    warn = apply_study(con, st)
+    n = sum(len(c["tasks"]) for c in st["cases"])
+    print(f"ตั้งการศึกษาแล้ว: {st['package_id']} · เคส {len(st['cases'])} · งาน {n} · คู่วัดความตรงกัน {len(st.get('extra') or [])}")
+    for w in warn:
+        print("  " + w)
+    for mk in sorted(studymod.markers(st)):
+        u = con.execute("SELECT role FROM users WHERE username = ?", (mk,)).fetchone()
+        if not u:
+            print(f"  คำเตือน: ยังไม่มีบัญชี {mk} (add-user {mk} --role team)")
+        elif u["role"] != "team":
+            print(f"  คำเตือน: {mk} ไม่ใช่บัญชีทีม — ผู้มาร์กต้องเป็นบัญชีทีม")
+
+
+def cmd_study(args):
+    cfg = load(args)
+    con = connect(cfg.db)
+    st = studymod.load_study(con)
+    if not st:
+        sys.exit("ยังไม่ได้ตั้งการศึกษา (set-study หรือ import-marks)")
+    p = studymod.progress(con, st, package_manifest(con, st["package_id"]))
+    print(f"การศึกษา {st['package_id']} · เคส {len(st['cases'])} · คู่วัดความตรงกัน {len(st.get('extra') or [])}")
+    for mk, t in p["team"].items():
+        print(f"  ผู้มาร์ก {mk}: เคส {t['cases']} + คู่พิเศษ · งาน {t['tasks']} · เสร็จ {t['done']}")
+    for d in p["doctors"]:
+        s = p["summary"][d]
+        print(f"  หมอ {d}: ยืนยันไม่แก้ {s['confirmed']} · แก้ {s['edited']} · มาร์กไม่ได้ {s['unmarkable']} · "
+              f"ข้าม {s['skipped']} · กำลังทำ {s['in_progress']} · ยังไม่เริ่ม {s['not_started']}")
+
+
+def cmd_export_marks(args):
+    cfg = load(args)
+    con = connect(cfg.db)
+    st = studymod.load_study(con)
+    if not st:
+        sys.exit("ยังไม่ได้ตั้งการศึกษา")
+    pkg, out_users, latest, events, meta = st["package_id"], [], [], [], []
+    for mk in sorted(studymod.markers(st)):
+        u = con.execute("SELECT id, username, role FROM users WHERE username = ?", (mk,)).fetchone()
+        if not u:
+            continue
+        out_users.append({"username": u["username"], "role": u["role"]})
+        for r in con.execute("SELECT task_id, rev, data, updated_at, saved_at FROM tasks_latest WHERE user_id = ? AND package_id = ?",
+                             (u["id"], pkg)):
+            latest.append({"username": mk, **dict(r)})
+        for r in con.execute("SELECT task_id, rev, data, saved_at FROM task_events WHERE user_id = ? AND package_id = ? ORDER BY id",
+                             (u["id"], pkg)):
+            events.append({"username": mk, **dict(r)})
+        r = con.execute("SELECT current_index, updated_at FROM user_meta WHERE user_id = ? AND package_id = ?", (u["id"], pkg)).fetchone()
+        if r:
+            meta.append({"username": mk, **dict(r)})
+    doc = {"format": MARKS_FORMAT, "version": 1, "exported_at": now_iso(), "package_id": pkg, "study": st,
+           "users": out_users, "tasks_latest": latest, "task_events": events, "user_meta": meta}
+    Path(args.out).write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+    done = sum(1 for r in latest if json.loads(r["data"]).get("status") in FINAL)
+    print(f"ส่งออกจุดของทีม {len(out_users)} คน · งาน {len(latest)} (เสร็จ {done}) · ประวัติ {len(events)} รายการ → {args.out}")
+    print("ไฟล์นี้ไม่มีภาพ แต่เป็นข้อมูลวิจัย — ส่งทางช่องทางเดียวกับแพ็กเกจ ห้ามขึ้น GitHub")
+
+
+def cmd_import_marks(args):
+    cfg = load(args)
+    con = connect(cfg.db)
+    doc = json.loads(Path(args.file).read_text(encoding="utf-8-sig"))
+    if doc.get("format") != MARKS_FORMAT or doc.get("version") != 1:
+        sys.exit("ไม่ใช่ไฟล์จุดของทีม (export-marks)")
+    st, pkg = doc["study"], doc["package_id"]
+    m = package_manifest(con, pkg)
+    try:
+        studymod.validate_study(st, m)
+    except studymod.StudyError as e:
+        sys.exit(f"หยุด: นิยามการศึกษาในไฟล์ไม่ถูกต้อง — {e}")
+    items = {it["task_id"]: it for it in m["items"]}
+    allowed = {mk: set(studymod.view_for(st, mk, "team")["tasks"]) for mk in studymod.markers(st)}
+    for r in doc["tasks_latest"] + doc["task_events"]:
+        if r["username"] not in allowed or r["task_id"] not in allowed[r["username"]]:
+            sys.exit(f"หยุด: ไฟล์มีงาน {r['task_id']} ของ {r['username']} ที่ไม่อยู่ในการศึกษา")
+        try:
+            clean_task(json.loads(r["data"]), items[r["task_id"]])
+        except Invalid as e:
+            sys.exit(f"หยุด: ข้อมูลงาน {r['task_id']} ของ {r['username']} ไม่ถูกต้อง — {e}")
+    con.execute("BEGIN IMMEDIATE")
+    created = []
+    try:
+        ids = {}
+        for u in doc["users"]:
+            row = con.execute("SELECT id, role FROM users WHERE username = ?", (u["username"],)).fetchone()
+            if row and row["role"] != "team":
+                raise SystemExit(f"หยุด: บัญชี {u['username']} บนเครื่องนี้ไม่ใช่บัญชีทีม")
+            if not row:
+                pw = auth.generate_password()
+                con.execute("INSERT INTO users (username, role, pw_hash, created_at) VALUES (?,?,?,?)",
+                            (u["username"], "team", auth.hash_password(pw), now_iso()))
+                row = con.execute("SELECT id, role FROM users WHERE username = ?", (u["username"],)).fetchone()
+                created.append((u["username"], pw))
+            ids[u["username"]] = row["id"]
+            have = con.execute("SELECT COUNT(*) FROM tasks_latest WHERE user_id = ? AND package_id = ?", (row["id"], pkg)).fetchone()[0]
+            if have and not args.replace:
+                raise SystemExit(f"หยุด: {u['username']} มีจุดบนเครื่องนี้อยู่แล้ว {have} งาน — ใส่ --replace ถ้าจะแทนที่ด้วยไฟล์นี้")
+            if have:
+                for t in ("tasks_latest", "task_events", "user_meta"):
+                    con.execute(f"DELETE FROM {t} WHERE user_id = ? AND package_id = ?", (row["id"], pkg))
+        for r in doc["tasks_latest"]:
+            con.execute("INSERT INTO tasks_latest (user_id, package_id, task_id, rev, data, updated_at, saved_at) VALUES (?,?,?,?,?,?,?)",
+                        (ids[r["username"]], pkg, r["task_id"], r["rev"], r["data"], r["updated_at"], r["saved_at"]))
+        for r in doc["task_events"]:
+            con.execute("INSERT INTO task_events (user_id, package_id, task_id, rev, data, saved_at) VALUES (?,?,?,?,?,?)",
+                        (ids[r["username"]], pkg, r["task_id"], r["rev"], r["data"], r["saved_at"]))
+        for r in doc["user_meta"]:
+            con.execute("INSERT INTO user_meta (user_id, package_id, current_index, updated_at) VALUES (?,?,?,?)",
+                        (ids[r["username"]], pkg, r["current_index"], r["updated_at"]))
+        studymod.save_study(con, st)
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    done = sum(1 for r in doc["tasks_latest"] if json.loads(r["data"]).get("status") in FINAL)
+    print(f"นำเข้าแล้ว: ผู้มาร์ก {len(ids)} คน · งาน {len(doc['tasks_latest'])} (เสร็จ {done}) · ประวัติ {len(doc['task_events'])} รายการ")
+    print(f"ตั้งการศึกษาแล้ว: {pkg} · เคส {len(st['cases'])}")
+    for name, pw in created:
+        print(f"สร้างบัญชีทีม {name} — รหัสผ่าน (แสดงครั้งเดียว ส่งให้เจ้าของด้วยตัวเอง): {pw}")
+
+
+def cmd_export_study(args):
+    cfg = load(args)
+    con = connect(cfg.db)
+    st = studymod.load_study(con)
+    if not st:
+        sys.exit("ยังไม่ได้ตั้งการศึกษา")
+    doc = studymod.export_study(con, st, package_manifest(con, st["package_id"]))
+    out = Path(args.out)
+    if out.suffix.lower() == ".csv":
+        import csv
+        head, rows = studymod.export_rows(doc)
+        with out.open("w", newline="", encoding="utf-8-sig") as f:
+            f.write("# " + doc["coord_convention"] + "\n")
+            w = csv.writer(f)
+            w.writerow(head)
+            w.writerows(rows)
+    else:
+        out.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"ส่งออกการศึกษา {doc['n_tasks']} งาน · หมอ {len(doc['doctors'])} คน → {out}")
+
+
 def cmd_run(args):
     from waitress import serve
     cfg = load(args)
@@ -308,11 +486,17 @@ def main():
     sub.add_parser("run")
     sub.add_parser("backup-now")
     s = sub.add_parser("export-json"); s.add_argument("username"); s.add_argument("package_id"); s.add_argument("out")
+    s = sub.add_parser("set-study"); s.add_argument("file")
+    sub.add_parser("study")
+    s = sub.add_parser("export-marks"); s.add_argument("out")
+    s = sub.add_parser("import-marks"); s.add_argument("file"); s.add_argument("--replace", action="store_true")
+    s = sub.add_parser("export-study"); s.add_argument("out")
     args = ap.parse_args()
     {"init": cmd_init, "add-package": cmd_add_package, "add-user": cmd_add_user, "make-link": cmd_make_link,
      "revoke-link": cmd_revoke_link, "reset-password": cmd_reset_password,
      "disable-user": cmd_disable_user, "assign": cmd_assign, "list": cmd_list, "run": cmd_run,
-     "backup-now": cmd_backup_now, "export-json": cmd_export_json}[args.cmd](args)
+     "backup-now": cmd_backup_now, "export-json": cmd_export_json, "set-study": cmd_set_study, "study": cmd_study,
+     "export-marks": cmd_export_marks, "import-marks": cmd_import_marks, "export-study": cmd_export_study}[args.cmd](args)
 
 
 if __name__ == "__main__":

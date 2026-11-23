@@ -1,7 +1,8 @@
 """แปลง DOCTOR_GUIDE.md เป็นหน้า HTML สำหรับพิมพ์ (A4 1 หน้า)
 
 วิธีใช้:
-    python tools/print_guide.py
+    python tools/print_guide.py              (DOCTOR_GUIDE.md)
+    python tools/print_guide.py TEAM_GUIDE.md
     แล้วเปิด DOCTOR_GUIDE_print.html ใน Edge → Ctrl+P → เลือกเครื่องพิมพ์ หรือ "บันทึกเป็น PDF"
 
 รองรับ Markdown เฉพาะที่ใช้ในคู่มือ: # หัวข้อ, ## หัวข้อย่อย, รายการ 1. / -, **ตัวหนา**, `โค้ด`
@@ -93,15 +94,18 @@ def convert(md: str) -> str:
     """แยกหน้าด้วยบรรทัด <!-- pagebreak --> · แต่ละหน้าเริ่มหน้ากระดาษใหม่ พิมพ์แยกหน้าได้"""
     pages = [convert_page(part) for part in md.split(PAGEBREAK) if part.strip()]
     body = "\n".join(f'<div class="page">{b}</div>' for _, b in pages)
-    title = "คู่มือแพทย์ PelNav"
+    title = pages[0][0] if pages else "คู่มือ PelNav"
     return (f'<!doctype html>\n<html lang="th"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1">'
             f"<title>{html.escape(title)}</title><style>{CSS}</style></head>\n<body>\n{body}\n</body></html>\n")
 
 
 def main():
-    OUT.write_text(convert(SRC.read_text(encoding="utf-8")), encoding="utf-8")
-    print(f"เขียน {OUT.name} แล้ว → เปิดใน Edge แล้วกด Ctrl+P")
+    import sys
+    src = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else SRC      # เช่น TEAM_GUIDE.md
+    out = src.with_name(src.stem + "_print.html")
+    out.write_text(convert(src.read_text(encoding="utf-8")), encoding="utf-8")
+    print(f"เขียน {out.name} แล้ว → เปิดใน Edge แล้วกด Ctrl+P")
 
 
 if __name__ == "__main__":

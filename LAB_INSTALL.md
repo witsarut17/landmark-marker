@@ -88,6 +88,15 @@ $c = "C:\PelNav\data\config.toml"
 4. Task Scheduler → คลิกขวา **PelNav Server** → **Run** · หน้าเว็บของหมอจะอัปเดตเองเมื่อเปิดครั้งถัดไป (งานไม่หาย)
 - **อัปเดตจาก v1.0 (รุ่นที่ใช้ HTTPS + Caddy):** รันขั้นที่ 3 ซ้ำ (ตัวติดตั้งตั้งค่า http ที่ 8090 ใหม่ ลบงาน **PelNav HTTPS** และกฎไฟร์วอลล์เดิมให้) แล้วลบโฟลเดอร์ `C:\PelNav\caddy` และ `C:\PelNav\certs` ได้ · บัญชีหมอที่มีอยู่ใช้ `make-link` ได้เลย (รหัสผ่านเดิมของหมอใช้ไม่ได้แล้ว)
 
+## อัปเดตเป็น v1.3 (ทีมมาร์กก่อน หมอตรวจ) บนเครื่องที่ติดตั้งแล้ว
+ไม่ต้องติดตั้งใหม่ · แพ็กเกจภาพเดิมใช้ต่อ · ทีมสร้าง **คู่มืออัปเดต 1 หน้า** ด้วย `tools/make_update_kit.py` (มี IP และลิงก์โค้ด อยู่ในโฟลเดอร์ส่วนตัวของทีม) และส่งพร้อม `team_marks.json` (จุดของทีม จาก `export-marks` บนโน้ตบุ๊ก)
+1. หยุดบริการ (Task Scheduler → **PelNav Server** → **End**) → `m backup-now`
+2. อัปโค้ดจาก zip ของ GitHub ทับ `C:\PelNav\app` (ไม่ลบ `.venv`) → `pip install -r server\requirements.txt`
+3. `m list` (ฐานข้อมูลได้ตารางใหม่เอง ข้อมูลเดิมไม่หาย) → `m import-marks C:\PelNav\import\team_marks.json` → `m study`
+4. เริ่มบริการ → หน้าทีมมีตาราง "การศึกษา" 70 เคส · ตรวจมุมมองหมอด้วยบัญชีชั่วคราว `check1` แล้ว `m disable-user check1`
+5. บัญชีหมอ: `m add-user doc1 --role doctor` · `m assign doc1 pkg-orig-20261117` · `m make-link doc1 --until <วันจบโครงการ> --base http://<IP เครื่องแล็บ>:8090/`
+- คำสั่งใหม่: `set-study` · `study` · `export-marks` · `import-marks [--replace]` · `export-study <ไฟล์.csv|.json>` (ไฟล์วิเคราะห์ ดาวน์โหลดจากหน้าทีมได้ด้วย)
+
 ## ถ้ามีปัญหา
 | อาการ | ทำอย่างไร |
 |---|---|

@@ -24,6 +24,7 @@ from flask import Flask, abort, g, jsonify, request, send_file, send_from_direct
 
 from . import auth
 from .backup import last_backup
+from . import study as studymod
 from .db import connect, now_iso
 from .validate import FINAL, IMG_EXT, Invalid, clean_task, load_manifest, public_manifest
 
@@ -162,6 +163,33 @@ def create_app(cfg: Config) -> Flask:
             abort(409, description="ยังไม่ได้กำหนดแพ็กเกจ หรือมีหลายแพ็กเกจ — ติดต่อทีม")
         return rows[0]
 
+    # ---------- การศึกษา ทีมมาร์ก-หมอตรวจ (v1.3) ----------
+    def study_view(u):
+        """(study, view) เมื่อผู้ใช้อยู่ในการศึกษา · ใส่ ?package= = ใช้แบบเดิม (ทดสอบ/ทีมดูภาพ) · ไม่อยู่ = (None, None)"""
+        if request.args.get("package"):
+            return None, None
+        if "study" not in g:
+            g.study = studymod.load_study(db())
+        st = g.study
+        if not st:
+            return None, None
+        if u["role"] == "doctor" and not db().execute(
+                "SELECT 1 FROM assignments WHERE user_id = ? AND package_id = ?", (u["id"], st["package_id"])).fetchone():
+            return None, None
+        v = studymod.view_for(st, u["username"], u["role"])
+        return (st, v) if v else (None, None)
+
+    def pkg_and_view(u):
+        st, v = study_view(u)
+        if v:
+            return st["package_id"], st, v
+        if u["role"] != "doctor":
+            abort(403, description="บัญชีทีมนี้ไม่ได้เป็นผู้มาร์กในการศึกษา — ใช้หน้า admin.html")
+        return assigned_package(u), None, None
+
+    def user_ids():
+        return {r["username"]: r["id"] for r in db().execute("SELECT id, username FROM users")}
+
     def ip_allowed(ip: str) -> bool:
         if not networks:
             return True
@@ -283,7 +311,8 @@ def create_app(cfg: Config) -> Flask:
     def me():
         u = require_user()
         pk = [r["package_id"] for r in db().execute("SELECT package_id FROM assignments WHERE user_id = ?", (u["id"],))]
-        return jsonify(username=u["username"], role=u["role"], packages=pk)
+        _, v = study_view(u)
+        return jsonify(username=u["username"], role=u["role"], packages=pk, study_mode=v["mode"] if v else None)
 
     @app.get("/api/health")
     def health():
@@ -294,15 +323,26 @@ def create_app(cfg: Config) -> Flask:
     @app.get("/api/package")
     def package():
         u = require_user()
-        m, _ = manifest_of(assigned_package(u))
-        return jsonify(public_manifest(m))
+        pkg, st, v = pkg_and_view(u)
+        m, _ = manifest_of(pkg)
+        if not v:
+            return jsonify(public_manifest(m))
+        pm = public_manifest(m, only=v["tasks"])         # เฉพาะงานของผู้ใช้นี้ เรียงตามเคส
+        pm.update(mode=v["mode"], cases=v["cases"])
+        return jsonify(pm)
 
     @app.get("/api/image/<task_id>/<side>")
     def image(task_id: str, side: str):
         u = require_user()
         if side not in ("xray", "fluoro"):
             abort(404)
-        pkg = assigned_package(u) if u["role"] == "doctor" else request.args.get("package") or abort(400)
+        st, v = study_view(u)
+        if v:
+            pkg = st["package_id"]
+            if task_id not in v["tasks"]:
+                abort(404)
+        else:
+            pkg = assigned_package(u) if u["role"] == "doctor" else request.args.get("package") or abort(400)
         m, pkg_dir = manifest_of(pkg)
         item = next((it for it in m["items"] if it["task_id"] == task_id), None)
         if not item:
@@ -327,12 +367,23 @@ def create_app(cfg: Config) -> Flask:
     @app.get("/api/state")
     def state():
         u = require_user()
-        return jsonify(state_of(u["id"], assigned_package(u)))
+        pkg, st, v = pkg_and_view(u)
+        out = state_of(u["id"], pkg)
+        if v and v["mode"] == "review":                   # จุดของทีมที่หมอตรวจ (snapshot ถ้าเคยบันทึกแล้ว)
+            ids = user_ids()
+            keep = ("xray", "fluoro", "status", "reason", "reason_text")
+            out["seeds"] = {}
+            for t in v["tasks"]:
+                sd = studymod.seed_for(db(), st, u["id"], t, ids)
+                out["seeds"][t] = {k: sd.get(k) for k in keep} if sd else None
+        return jsonify(out)
 
     @app.put("/api/tasks/<task_id>")
     def save_task(task_id: str):
-        u = require_user("doctor")
-        pkg = assigned_package(u)
+        u = require_user()
+        pkg, st, v = pkg_and_view(u)
+        if v and task_id not in v["tasks"]:
+            abort(404)
         m, _ = manifest_of(pkg)
         item = next((it for it in m["items"] if it["task_id"] == task_id), None)
         if not item:
@@ -355,6 +406,13 @@ def create_app(cfg: Config) -> Flask:
                 con.execute("ROLLBACK")
                 return jsonify(error="conflict", rev=cur, task=json.loads(row["data"]) if row else None), 409
             new_rev, saved = cur + 1, now_iso()
+            if v and v["mode"] == "review" and not row:   # หมอบันทึกงานนี้ครั้งแรก -> เก็บจุดของทีมที่หมอเห็นไว้ (ไม่ถูกแก้ภายหลัง)
+                mk = studymod.primary_marker(st).get(task_id)
+                mrow = con.execute("""SELECT t.rev, t.data FROM tasks_latest t JOIN users x ON x.id = t.user_id
+                                      WHERE x.username = ? AND t.package_id = ? AND t.task_id = ?""", (mk, pkg, task_id)).fetchone()
+                con.execute("""INSERT OR IGNORE INTO review_seeds (user_id, package_id, task_id, team_user, team_rev, data, created_at)
+                               VALUES (?,?,?,?,?,?,?)""", (u["id"], pkg, task_id, mk, mrow["rev"] if mrow else 0,
+                                                          mrow["data"] if mrow else None, saved))
             data = json.dumps(task, ensure_ascii=False, separators=(",", ":"))
             con.execute("""INSERT INTO tasks_latest (user_id, package_id, task_id, rev, data, updated_at, saved_at)
                            VALUES (?,?,?,?,?,?,?)
@@ -372,12 +430,13 @@ def create_app(cfg: Config) -> Flask:
 
     @app.put("/api/meta")
     def save_meta():
-        u = require_user("doctor")
-        pkg = assigned_package(u)
+        u = require_user()
+        pkg, st, v = pkg_and_view(u)
         d = request.get_json(silent=True) or {}
         idx = d.get("current_index")
         m, _ = manifest_of(pkg)
-        if not isinstance(idx, int) or isinstance(idx, bool) or not (0 <= idx < len(m["items"])):
+        n = len(v["tasks"]) if v else len(m["items"])
+        if not isinstance(idx, int) or isinstance(idx, bool) or not (0 <= idx < n):
             abort(400, description="current_index ผิด")
         db().execute("""INSERT INTO user_meta (user_id, package_id, current_index, updated_at) VALUES (?,?,?,?)
                         ON CONFLICT (user_id, package_id) DO UPDATE SET current_index = excluded.current_index,
@@ -398,7 +457,34 @@ def create_app(cfg: Config) -> Flask:
             out.append({"username": r["username"], "package_id": r["package_id"], "total": len(m["items"]),
                         "done": sum(s in FINAL for s in sts), "skipped": sum(s == "skipped" for s in sts),
                         "last_saved": max((x["saved_at"] for x in rows), default=None)})
-        return jsonify(doctors=out, last_backup=last_backup(cfg.backups))
+        st = studymod.load_study(db())
+        prog = studymod.progress(db(), st, manifest_of(st["package_id"])[0]) if st else None
+        return jsonify(doctors=out, last_backup=last_backup(cfg.backups), study=prog)
+
+    @app.get("/api/admin/study-export")
+    def admin_study_export():
+        """ไฟล์วิเคราะห์: json = ทุกอย่างพร้อมประวัติ · csv = 1 แถวต่อ (งาน, หมอ) จับคู่กับ orig_key.csv ด้วย task_id"""
+        require_user("team")
+        st = studymod.load_study(db())
+        if not st:
+            abort(404, description="ยังไม่ได้ตั้งค่าการศึกษา (set-study)")
+        doc = studymod.export_study(db(), st, manifest_of(st["package_id"])[0])
+        stamp = now_iso()[:10]
+        if request.args.get("format") == "csv":
+            import csv
+            import io
+            head, rows = studymod.export_rows(doc)
+            buf = io.StringIO()
+            buf.write("\ufeff# " + doc["coord_convention"] + "\n")
+            w = csv.writer(buf)
+            w.writerow(head)
+            w.writerows(rows)
+            resp = app.response_class(buf.getvalue(), mimetype="text/csv; charset=utf-8")
+            resp.headers["Content-Disposition"] = f"attachment; filename=study_{st['package_id']}_{stamp}.csv"
+            return resp
+        resp = jsonify(doc)
+        resp.headers["Content-Disposition"] = f"attachment; filename=study_{st['package_id']}_{stamp}.json"
+        return resp
 
     @app.get("/api/admin/data")
     def admin_data():

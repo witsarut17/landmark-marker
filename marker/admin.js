@@ -31,6 +31,7 @@
         return;
       }
       $('who').textContent = `เข้าสู่ระบบเป็น ${me.username} (ทีมวิจัย)`;
+      $('btnMark').hidden = me.study_mode !== 'mark';
       await overview();
     } catch (e) {
       if (e.status === 401) { show('login'); return; }
@@ -69,7 +70,40 @@
       tr.append(td);
       tb.append(tr);
     }
+    renderStudy(d.study);
     show('overview');
+  }
+
+  const RS_NAME = { confirmed: 'ยืนยันไม่แก้', edited: 'แก้', unmarkable: 'มาร์กไม่ได้', skipped: 'ข้าม', in_progress: 'กำลังทำ', not_started: 'ยังไม่เริ่ม' };
+  function renderStudy(st) {
+    $('studyCard').hidden = !st;
+    if (!st) return;
+    const parts = [];
+    for (const [mk, t] of Object.entries(st.team)) parts.push(`ผู้มาร์ก ${mk}: เสร็จ ${t.done}/${t.tasks} คู่ (${t.cases} เคส + คู่พิเศษ)`);
+    const ex = st.extra.filter((e) => e.done).length;
+    parts.push(`คู่วัดความตรงกันระหว่างผู้มาร์ก: เสร็จ ${ex}/${st.extra.length}`);
+    for (const d of st.doctors) {
+      const s = st.summary[d];
+      parts.push(`หมอ ${d}: ยืนยันไม่แก้ ${s.confirmed} · แก้ ${s.edited} · มาร์กไม่ได้ ${s.unmarkable} · ข้าม ${s.skipped} · กำลังทำ ${s.in_progress} · ยังไม่เริ่ม ${s.not_started}`);
+    }
+    if (!st.doctors.length) parts.push('ยังไม่มีหมอที่กำหนดแพ็กเกจของการศึกษา');
+    $('studySummary').innerHTML = '';
+    for (const t of parts) { const div = document.createElement('div'); div.textContent = t; $('studySummary').append(div); }
+    const tb = $('studyRows');
+    tb.innerHTML = '';
+    for (const c of st.cases) {
+      const tr = document.createElement('tr');
+      const rv = Object.entries(c.reviews).map(([d, cnt]) =>
+        `${st.doctors.length > 1 ? d + ': ' : ''}${Object.entries(cnt).map(([k, n]) => `${RS_NAME[k] || k} ${n}`).join(' · ')}`).join(' / ');
+      const team = `${c.team_done}/${c.n}${c.team_skipped ? ` (ข้าม ${c.team_skipped})` : ''}`;
+      for (const [i, v] of [`เคส ${c.no}`, String(c.n), c.marker, team, rv || '—'].entries()) {
+        const td = document.createElement('td');
+        td.textContent = v;
+        if (i === 3 && c.team_done === c.n) td.className = 'ok-text';
+        tr.append(td);
+      }
+      tb.append(tr);
+    }
   }
 
   async function download(user, pkg, kind) {

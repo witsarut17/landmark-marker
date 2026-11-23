@@ -74,6 +74,8 @@
     storage: { ok: false, reason: 'ยังไม่ได้ตรวจ', persisted: null },
     imagesReady: false, fluoroArea: null,
     lastInteraction: Date.now(), saveError: null, busy: false,
+    // การศึกษา ทีมมาร์ก-หมอตรวจ (v1.3): manifest มี cases -> หน้ารายการเคส · mode 'mark' (ทีม) / 'review' (หมอ)
+    mode: null, cases: null, caseOfIndex: [], seeds: {},
   };
   try {
     state.fingerMode = localStorage.getItem('fingerMode') === '1';
@@ -81,6 +83,8 @@
   } catch (_) { /* ignore */ }
 
   const currentItem = () => (state.manifest ? state.manifest.items[state.index] : null);
+  const VIEW_KEY = 'pelnavInTask';                 // อยู่ในงาน (ไม่ใช่หน้ารายการ) — ใช้ตอนโหลดหน้าใหม่ (อัปเดตเอง)
+  const caseMode = () => !!state.cases;
   const newTask = () => ({
     xray: new Array(N).fill(null), fluoro: new Array(N).fill(null),
     status: 'todo', reason: null, reason_text: null, note: null,
@@ -89,8 +93,34 @@
   function task() {
     const it = currentItem();
     if (!it) return null;
-    if (!state.tasks[it.task_id]) state.tasks[it.task_id] = newTask();
+    if (!state.tasks[it.task_id]) state.tasks[it.task_id] = seededTask(it.task_id);
     return state.tasks[it.task_id];
+  }
+  // หมอตรวจ: งานเริ่มจากจุดของทีม (สำเนา) · จุดของทีมบนเซิร์ฟเวอร์ไม่ถูกแก้
+  function seededTask(tid) {
+    const t = newTask();
+    const s = state.mode === 'review' ? state.seeds[tid] : null;
+    if (s) {
+      for (const side of ['xray', 'fluoro']) {
+        const src = Array.isArray(s[side]) ? s[side] : [];
+        t[side] = [...Array(N).keys()].map((i) => (src[i] ? { x: src[i].x, y: src[i].y,
+          image_px_per_screen_px: src[i].image_px_per_screen_px, at: src[i].at } : null));
+      }
+    }
+    return t;
+  }
+  // จำนวนจุดที่หมอแก้ (ย้าย/เพิ่ม/ลบ) เทียบกับจุดของทีม
+  function reviewEdits(tid, t) {
+    const s = state.seeds[tid];
+    let n = 0;
+    for (const side of ['xray', 'fluoro']) {
+      for (let i = 0; i < N; i++) {
+        const a = s && s[side] ? s[side][i] : null, b = t[side][i];
+        if (!!a !== !!b) n++;
+        else if (a && b && Math.hypot(a.x - b.x, a.y - b.y) > 0.05) n++;
+      }
+    }
+    return n;
   }
   const pairCount = (t) => [...Array(N).keys()].filter((i) => t.xray[i] && t.fluoro[i]).length;
   const hasOrphans = (t) => [...Array(N).keys()].some((i) => !!t.xray[i] !== !!t.fluoro[i]);
@@ -183,6 +213,82 @@
       if (p) out.push({ idx, x: p.x, y: p.y, selected: !!(state.selected && state.selected.side === side && state.selected.idx === idx) });
     });
     return out;
+  }
+
+  // ---------- ตัวช่วยของทีม (โหมดมาร์ก): คาดตำแหน่งจุดที่ 4 + เตือนจุดที่อาจไม่ตรงคู่ ----------
+  // ใช้การแปลงแบบ affine จาก 3 คู่ (พอดีเป๊ะ) · ไม่แสดงให้หมอ
+  const assistOn = () => state.mode === 'mark' && !!(CFG.teamAssist && CFG.teamAssist.enabled);
+  function affineFit(src, dst) {
+    const [p1, p2, p3] = src;
+    const det = p1.x * (p2.y - p3.y) - p2.x * (p1.y - p3.y) + p3.x * (p1.y - p2.y);
+    const span = Math.max(Math.hypot(p2.x - p1.x, p2.y - p1.y), Math.hypot(p3.x - p1.x, p3.y - p1.y), 1);
+    if (Math.abs(det) < 1e-3 * span * span) return null;            // 3 จุดเกือบอยู่แนวเดียวกัน
+    const solve = (k) => {
+      const [a, b, c] = dst.map((q) => q[k]);
+      return [
+        (a * (p2.y - p3.y) - b * (p1.y - p3.y) + c * (p1.y - p2.y)) / det,
+        (p1.x * (b - c) - p2.x * (a - c) + p3.x * (a - b)) / det,
+        (p1.x * (p2.y * c - p3.y * b) - p2.x * (p1.y * c - p3.y * a) + p3.x * (p1.y * b - p2.y * a)) / det,
+      ];
+    };
+    return { x: solve('x'), y: solve('y') };
+  }
+  const applyAff = (A, p) => ({ x: A.x[0] * p.x + A.x[1] * p.y + A.x[2], y: A.y[0] * p.x + A.y[1] * p.y + A.y[2] });
+  // ตำแหน่งที่คาดของจุด k บน side (เมื่ออีกภาพมีจุด k แล้ว หรือกำลังวางอยู่ และมีคู่ครบอย่างน้อย 3 คู่)
+  function ghostFor(side) {
+    if (!assistOn() || !CFG.teamAssist.showPrediction) return null;
+    const t = task();
+    if (!t) return null;
+    const k = activeIndex(t);
+    if (k == null || t[side][k]) return null;
+    const other = side === 'xray' ? 'fluoro' : 'xray';
+    let src = t[other][k];
+    const ses = info[other] && info[other].session;
+    if (ses && ses.idx === k) src = { x: ses.x, y: ses.y };
+    if (!src) return null;
+    const pairs = [...Array(N).keys()].filter((i) => i !== k && t.xray[i] && t.fluoro[i]).slice(0, 3);
+    if (pairs.length < 3) return null;
+    const A = affineFit(pairs.map((i) => t[other][i]), pairs.map((i) => t[side][i]));
+    return A ? { k, ...applyAff(A, src) } : null;
+  }
+  function drawGhost(ctx, v, side) {
+    const g = ghostFor(side);
+    if (!g) return;
+    const q = v.imageToScreen(g.x, g.y);
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = CFG.marks.colors[g.k] || '#fff';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.arc(q.x, q.y, 18, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(q.x - 6, q.y); ctx.lineTo(q.x + 6, q.y); ctx.moveTo(q.x, q.y - 6); ctx.lineTo(q.x, q.y + 6); ctx.stroke();
+    ctx.font = '12px system-ui, sans-serif'; ctx.fillStyle = ctx.strokeStyle;
+    ctx.fillText(`คาด ${g.k + 1}`, q.x + 21, q.y - 8);
+    ctx.restore();
+  }
+  // ครบ 4 คู่: ทายแต่ละจุดเอกซเรย์จากอีก 3 คู่ (ต่างกันเท่าไร = ต้องย้ายจุดนั้นเท่าไรให้สอดคล้อง)
+  // 4 คู่ระบุไม่ได้ทางคณิตศาสตร์ว่าจุดไหนผิด (ย้ายจุดใดจุดหนึ่งก็แก้ได้) จึง: เตือนเมื่อแม้แก้จุดที่แก้ง่ายที่สุดก็ยังเกินเกณฑ์
+  // และชี้คู่ที่วาง/ย้ายล่าสุด (มักเป็นคู่ที่เพิ่งวางผิด)
+  function mismatchWarning() {
+    if (!assistOn()) return '';
+    const t = task(), it = currentItem();
+    if (!t || !it || pairCount(t) < N) return '';
+    const b = it.box_xyxy;
+    const diag = Math.hypot(b[2] - b[0], b[3] - b[1]) || 1;
+    const err = [];
+    for (let i = 0; i < N; i++) {
+      const o = [...Array(N).keys()].filter((j) => j !== i);
+      const A = affineFit(o.map((j) => t.fluoro[j]), o.map((j) => t.xray[j]));
+      if (!A) return '';                                  // 3 จุดเกือบแนวเดียวกัน — มีคำเตือนการกระจายอยู่แล้ว
+      const p = applyAff(A, t.fluoro[i]);
+      err.push((100 * Math.hypot(p.x - t.xray[i].x, p.y - t.xray[i].y)) / diag);
+    }
+    if (Math.min(...err) <= CFG.teamAssist.mismatchPct) return '';
+    const last = (i) => [t.xray[i].at || '', t.fluoro[i].at || ''].sort().pop();
+    let k = 0;
+    for (let i = 1; i < N; i++) if (last(i) > last(k)) k = i;
+    return `จุด ${k + 1} อาจไม่ตรงคู่ (ไม่สอดคล้องกับอีก 3 คู่ ~${Math.round(err[k])}% ของกรอบ) — ตรวจคู่นี้ก่อน`;
   }
 
   // ---------- ตรวจการกระจายของจุด (เตือน ไม่บล็อก) ----------
@@ -340,9 +446,14 @@
       getPoints: () => pointsFor(side),
       nextIndex: () => nextIndexFor(side),
       isFingerMode: () => state.fingerMode,
-      onOverlay: side === 'xray' ? drawBox : null,
+      onOverlay: (ctx, v) => { if (side === 'xray') drawBox(ctx, v); drawGhost(ctx, v, side); },
       onUserView: side === 'xray' ? () => setXView('custom') : null,
-      onInfo: (i) => { info[side] = i; readoutEl.textContent = readoutText(side); },
+      onInfo: (i) => {
+        const had = !!(info[side] && info[side].session);
+        info[side] = i;
+        readoutEl.textContent = readoutText(side);
+        if (assistOn() && viewersRef && (had || i.session)) viewersRef[side === 'xray' ? 'fluoro' : 'xray'].requestRender();
+      },
       onCommit: (c) => commitPoint(side, c),
       onSessionStart: (mode, idx) => {
         if (mode === 'move') state.selected = { side, idx };
@@ -358,10 +469,12 @@
       },
     });
   }
+  let viewersRef = null;
   const viewers = {
     xray: makeViewer('xray', $('viewerX'), $('readoutX')),
     fluoro: makeViewer('fluoro', $('viewerF'), $('readoutF')),
   };
+  viewersRef = viewers;
   const panes = { xray: $('paneX'), fluoro: $('paneF') };
 
   function setXView(mode) {
@@ -399,7 +512,10 @@
         for (const s of SIDES) panes[s].style.borderColor = '';
       } else if (k == null) {
         chip.textContent = '✓'; chip.style.background = '#3ddc84';
-        $('hintText').textContent = 'ครบ 4 คู่แล้ว — กด ถัดไป (ลากจุดเพื่อปรับได้)';
+        $('hintText').textContent = state.mode === 'review'
+          ? (FINAL.has(t.status) ? 'ยืนยันแล้ว — ลากจุดเพื่อแก้ได้ แล้วกด ยืนยัน อีกครั้ง'
+            : 'ตรวจจุดของทีม: ถูกต้อง กด ยืนยัน · ไม่ตรง ลากจุดเพื่อแก้ แล้วกด ยืนยัน')
+          : 'ครบ 4 คู่แล้ว — กด ถัดไป (ลากจุดเพื่อปรับได้)';
         for (const s of SIDES) panes[s].style.borderColor = '';
       } else {
         const color = CFG.marks.colors[k];
@@ -413,9 +529,21 @@
         for (const s of SIDES) panes[s].style.borderColor = need.includes(s) ? color : '';
         if (t.status === 'partial') $('hintText').textContent = 'งานนี้: บันทึก 3 คู่ — ' + $('hintText').textContent;
         if (t.status === 'skipped') $('hintText').textContent = 'งานนี้: ข้ามไว้ — ' + $('hintText').textContent;
+        const sd = state.mode === 'review' ? state.seeds[currentItem().task_id] : null;
+        if (state.mode === 'review' && !FINAL.has(t.status)) {
+          if (sd && sd.status === 'unmarkable' && pairs === 0) {
+            $('hintText').textContent = `ทีมระบุว่ามาร์กไม่ได้ (${REASON_NAME[sd.reason] || sd.reason || '-'}) — ถ้าเห็นด้วย กด มาร์กไม่ได้ · ถ้ามาร์กได้ ให้วางจุดเอง`;
+          } else if (!sd || pairs === 0) {
+            $('hintText').textContent = 'งานนี้ไม่มีจุดของทีม — วางจุดเอง หรือกด มาร์กไม่ได้';
+          } else {
+            $('hintText').textContent = 'ตรวจจุดของทีม: ' + $('hintText').textContent;
+          }
+        }
       }
       warn = SIDES.map(spreadWarning).filter(Boolean).join(' · ');
       if (warn) warn = '⚠ ' + warn + ' — ควรกระจายให้ทั่ว';
+      const mm = mismatchWarning();
+      if (mm) warn = (warn ? warn + ' · ' : '') + '⚠ ' + mm;
     }
     $('warnText').textContent = warn;
     $('hintText').title = $('hintText').textContent;   // ข้อความยาวถูกตัด: ชี้/แตะค้างเพื่อดูเต็ม
@@ -431,12 +559,16 @@
   function updateTopbar() {
     const m = state.manifest;
     const n = totalTasks();
-    $('taskLabel').textContent = m ? `${m.items[state.index].task_id} / ${n}` : '— / —';
+    const c = caseMode() ? state.caseOfIndex[state.index] : null;
+    $('taskLabel').textContent = !m ? '— / —'
+      : c ? `เคส ${c.no} · คู่ ${c.idx.indexOf(state.index) + 1}/${c.idx.length}` : `${m.items[state.index].task_id} / ${n}`;
+    $('btnCases').hidden = !caseMode();
+    $('btnNext').textContent = state.mode === 'review' ? 'ยืนยัน ▶' : 'ถัดไป ▶';
     const pr = $('progress');
     pr.textContent = m ? `ทำแล้ว ${completedCount()}/${n}` : '';
     const sk = m ? skippedCount() : 0;
     if (sk) pr.append(' · ', el('span', { class: 'skip-count', text: `ข้ามไว้ ${sk}` }));
-    $('btnPrev').disabled = !m || state.index <= 0;
+    $('btnPrev').disabled = !m || prevIndex() < 0;
     $('btnNext').disabled = !m;
     const cur = m ? state.tasks[m.items[state.index].task_id] : null;
     $('btnSkip').disabled = !m || !!(cur && FINAL.has(cur.status));
@@ -807,7 +939,7 @@
       showStart('msg', `${e.message} — ตรวจว่าเปิด VPN แล้ว แล้วกด ลองใหม่`);
       return;
     }
-    if (me.role !== 'doctor') {
+    if (me.role !== 'doctor' && !me.study_mode) {
       showStart('msg', `บัญชี ${me.username} เป็นบัญชีทีมวิจัย — ใช้หน้า admin.html`);
       $('btnRetry').hidden = true;
       return;
@@ -826,6 +958,9 @@
       if (errs.length) throw new Loader.BlockingError('ข้อมูลแพ็กเกจจากเซิร์ฟเวอร์ไม่ถูกต้อง', errs);
       const ids = new Set(manifest.items.map((it) => it.task_id));
       state.manifest = manifest;
+      state.mode = manifest.mode || null;
+      state.seeds = st.seeds || {};
+      setupCases(manifest);
       state.tasks = {};
       sync.sent = {};
       sync.revs = st.revs || {};
@@ -855,7 +990,9 @@
       if (Object.keys(st.tasks || {}).length) toast(`ทำต่อจากที่บันทึกไว้ (เสร็จ ${completedCount()}/${manifest.items.length})`);
       if (restored) { toast(`ส่งงานที่ค้างจากครั้งก่อน ${restored} งาน`, 4000); persistOutbox(); }
       updateSaveLabel();
-      await showTask(idx);
+      let inTask = false;
+      try { inTask = sessionStorage.getItem(VIEW_KEY) === '1'; } catch (_) { /* ignore */ }
+      if (caseMode() && !inTask) { state.index = idx; refreshMarks(); showCaseList(); } else await showTask(idx);
       flushSoon(0);
     } catch (e) {
       if (e.status === 401) { showLogin(); return; }
@@ -937,6 +1074,10 @@
     const m = state.manifest;
     if (!m) return;
     i = Math.max(0, Math.min(m.items.length - 1, i));
+    if (caseMode()) {                                 // เปิดงาน = ออกจากหน้ารายการเคส
+      $('caseScreen').hidden = true;
+      try { sessionStorage.setItem(VIEW_KEY, '1'); } catch (_) { /* ignore */ }
+    }
     const changed = i !== state.index;
     state.index = i;
     state.selected = null;
@@ -1028,6 +1169,10 @@
       toast(`ยังไม่ครบ (${pc}/4 คู่) — ต้องครบ 4 คู่ หรือ 3 คู่พร้อมเหตุผล หรือกด "มาร์กไม่ได้" (หรือ "ข้ามไปก่อน")`, 3500);
       return;
     }
+    if (state.mode === 'review' && FINAL.has(t.status) && t.status !== 'unmarkable') {
+      const e = reviewEdits(currentItem().task_id, t);
+      toast(e ? `ยืนยันแล้ว — แก้ ${e} จุด` : 'ยืนยันแล้ว — ไม่ได้แก้', 2500);
+    }
     await advance();
   }
 
@@ -1072,14 +1217,26 @@
   // ---------- เลือกงานถัดไป ----------
   // ลำดับ: งานที่ยังไม่เสร็จและไม่ได้ข้าม (ไปข้างหน้า) → งานที่ยังไม่เสร็จที่อยู่ก่อนหน้า → งานที่ข้ามไว้ (วนทีละงาน)
   const isFinalAt = (i) => FINAL.has(statusAt(i));
+  // ขอบเขตการเลื่อนงาน: โหมดรายการเคส = งานในเคสเดียวกันเท่านั้น · แบบเดิม = ทุกงาน
+  function scope() {
+    if (!caseMode()) return [...Array(totalTasks()).keys()];
+    const c = state.caseOfIndex[state.index];
+    return c ? c.idx : [state.index];
+  }
   function findForward(from, pred) {
-    for (let i = from + 1; i < totalTasks(); i++) if (pred(i)) return i;
+    const sc = scope();
+    for (let k = sc.indexOf(from) + 1; k < sc.length; k++) if (pred(sc[k])) return sc[k];
     return -1;
   }
   function findCyclic(from, pred) {          // หลังงานนี้ไปจนสุด แล้ววนจากต้น (ไม่รวมงานนี้)
-    const n = totalTasks();
-    for (let k = 1; k < n; k++) { const i = (from + k) % n; if (pred(i)) return i; }
+    const sc = scope(), n = sc.length, at = sc.indexOf(from);
+    for (let k = 1; k < n; k++) { const i = sc[(at + k + n) % n]; if (pred(i)) return i; }
     return -1;
+  }
+  function prevIndex() {
+    if (!state.manifest) return -1;
+    const sc = scope(), at = sc.indexOf(state.index);
+    return at > 0 ? sc[at - 1] : -1;
   }
   const isOpenNormal = (i) => !isFinalAt(i) && statusAt(i) !== 'skipped';
   const isSkipped = (i) => statusAt(i) === 'skipped';
@@ -1088,6 +1245,13 @@
     state.busy = true;
     try {
       refreshMarks();
+      if (caseMode()) {                              // ภายในเคส: งานถัดไปที่ยังไม่เสร็จ · ครบแล้วกลับหน้ารายการเคส
+        const nx = findForward(state.index, isOpenNormal);
+        const left = nx >= 0 ? nx : findCyclic(state.index, isOpenNormal);
+        if (left >= 0) { await showTask(left); return; }
+        backToCases(caseDoneMessage(state.caseOfIndex[state.index]));
+        return;
+      }
       const n = totalTasks();
       const fwd = findForward(state.index, isOpenNormal);
       if (fwd >= 0) { await showTask(fwd); return; }
@@ -1126,6 +1290,7 @@
     try {
       let nx = findForward(state.index, isOpenNormal);
       if (nx < 0) nx = findCyclic(state.index, isOpenNormal);
+      if (nx < 0 && caseMode()) { backToCases(caseDoneMessage(state.caseOfIndex[state.index])); return; }
       if (nx < 0) nx = findCyclic(state.index, isSkipped);
       if (nx < 0) { toast('เหลืองานนี้งานเดียว — วางจุดให้ครบ หรือกด "มาร์กไม่ได้"', 4000); return; }
       if (isSkipped(nx)) toast(`ไปงานที่ข้ามไว้ถัดไป (เหลือ ${skippedCount()} งาน)`, 3000);
@@ -1141,9 +1306,16 @@
     const mt = /^[Tt]?0*(\d+)$/.exec(raw);
     const num = mt ? parseInt(mt[1], 10) : NaN;
     const items = state.manifest.items;
-    let i = items.findIndex((it) => parseInt(it.task_id.slice(1), 10) === num);
-    if (i < 0 && num >= 1 && num <= items.length) i = num - 1;
-    if (i < 0) { toast(`ไม่มีงานเลข "${raw}" — พิมพ์เลข 1 ถึง ${items.length}`, 3500); return; }
+    let i;
+    if (caseMode()) {                                  // ภายในเคส: คู่ที่ 1..n ของเคสนี้
+      const sc = scope();
+      i = num >= 1 && num <= sc.length ? sc[num - 1] : -1;
+      if (i < 0) { toast(`เคสนี้มี ${sc.length} คู่ — พิมพ์เลข 1 ถึง ${sc.length}`, 3500); return; }
+    } else {
+      i = items.findIndex((it) => parseInt(it.task_id.slice(1), 10) === num);
+      if (i < 0 && num >= 1 && num <= items.length) i = num - 1;
+      if (i < 0) { toast(`ไม่มีงานเลข "${raw}" — พิมพ์เลข 1 ถึง ${items.length}`, 3500); return; }
+    }
     inp.value = '';
     inp.blur();
     for (const v of Object.values(viewers)) v.cancelSession();
@@ -1189,8 +1361,94 @@
     if (a === 'logout') await logout();
   }
 
+  // ---------- หน้ารายการเคส ----------
+  function setupCases(manifest) {
+    state.cases = null;
+    state.caseOfIndex = [];
+    if (!Array.isArray(manifest.cases)) return;
+    const byId = new Map(manifest.items.map((it, i) => [it.task_id, i]));
+    const cases = manifest.cases.map((c) => ({ no: c.no, idx: (c.tasks || []).map((t) => byId.get(t)) }));
+    if (!cases.length || cases.some((c) => !c.idx.length || c.idx.some((i) => i == null))) {
+      throw new Loader.BlockingError('ข้อมูลรายการเคสจากเซิร์ฟเวอร์ไม่ถูกต้อง', ['แจ้งทีมวิจัย']);
+    }
+    for (const c of cases) for (const i of c.idx) state.caseOfIndex[i] = c;
+    state.cases = cases;
+  }
+  function caseStatus(c) {
+    const sts = c.idx.map(statusAt);
+    const done = sts.filter((x) => FINAL.has(x)).length;
+    if (done === sts.length) return { key: 'done', text: 'เสร็จ' };
+    if (sts.includes('skipped')) return { key: 'skip', text: `มีงานข้าม · ${done}/${sts.length}` };
+    if (done > 0 || sts.some((x) => x !== 'todo')) return { key: 'part', text: `ทำแล้ว ${done}/${sts.length}` };
+    return { key: 'todo', text: 'ยังไม่เริ่ม' };
+  }
+  function caseDoneMessage(c) {
+    if (!c) return '';
+    const sk = c.idx.filter((i) => statusAt(i) === 'skipped').length;
+    return sk ? `เคส ${c.no}: ข้ามไว้ ${sk} คู่ — แตะเคสนี้เพื่อกลับไปทำ` : `เคส ${c.no} เสร็จแล้ว`;
+  }
+  function nextOpenCase() {
+    const n = state.cases.length;
+    const start = Math.max(0, state.cases.indexOf(state.caseOfIndex[state.index]));
+    for (const pred of [isOpenNormal, isSkipped]) {
+      for (let k = 0; k < n; k++) { const c = state.cases[(start + k) % n]; if (c.idx.some(pred)) return c; }
+    }
+    return null;
+  }
+  function renderCaseList() {
+    const list = $('caseList');
+    list.textContent = '';
+    const onlyOpen = $('caseFilter').checked;
+    let shown = 0;
+    for (const c of state.cases) {
+      const s = caseStatus(c);
+      if (onlyOpen && s.key === 'done') continue;
+      shown++;
+      const b = el('button', { class: `case-item st-${s.key}`, 'data-case': String(c.no), type: 'button' },
+        [el('b', { text: `เคส ${c.no}` }), el('span', { text: s.text })]);
+      b.addEventListener('click', () => openCase(c));
+      list.append(b);
+    }
+    if (!shown) list.append(el('p', { class: 'muted', text: 'ทำครบทุกเคสแล้ว' }));
+    const doneCases = state.cases.filter((c) => caseStatus(c).key === 'done').length;
+    $('caseTitle').textContent = state.mode === 'review' ? 'ตรวจจุดของทีม — รายการเคส' : 'มาร์กจุด — รายการเคส';
+    $('caseSummary').textContent = `เสร็จ ${doneCases}/${state.cases.length} เคส · ${completedCount()}/${totalTasks()} คู่`
+      + (skippedCount() ? ` · ข้ามไว้ ${skippedCount()} คู่` : '');
+    $('caseUser').textContent = sync.user ? `บัญชี ${sync.user}` : '';
+    $('btnContinue').disabled = !nextOpenCase();
+  }
+  function showCaseList(msg = '') {
+    for (const v of Object.values(viewers)) v.cancelSession();
+    try { sessionStorage.removeItem(VIEW_KEY); } catch (_) { /* ignore */ }
+    renderCaseList();
+    $('caseMsg').textContent = msg;
+    $('caseScreen').hidden = false;
+  }
+  function backToCases(msg = '') {
+    save();
+    flushSoon(0);
+    showCaseList(msg);
+  }
+  async function openCase(c) {
+    if (!c || state.busy) return;
+    const i = c.idx.find(isOpenNormal) ?? c.idx.find(isSkipped) ?? c.idx[0];
+    Debug.log(`เปิดเคส ${c.no}`);
+    await showTask(i);
+  }
+  $('btnContinue').addEventListener('click', () => {
+    const c = nextOpenCase();
+    if (c) openCase(c); else toast('ทำครบทุกเคสแล้ว');
+  });
+  $('caseFilter').addEventListener('change', () => {
+    try { localStorage.setItem('caseFilter', $('caseFilter').checked ? '1' : '0'); } catch (_) { /* ignore */ }
+    renderCaseList();
+  });
+  try { $('caseFilter').checked = localStorage.getItem('caseFilter') === '1'; } catch (_) { /* ignore */ }
+  $('btnCases').addEventListener('click', () => { if (!state.busy) backToCases(); });
+  $('btnCasePause').addEventListener('click', finish);
+
   // ---------- ปุ่ม / คีย์ลัด ----------
-  $('btnPrev').addEventListener('click', () => { if (!state.busy) showTask(state.index - 1); });
+  $('btnPrev').addEventListener('click', () => { const i = prevIndex(); if (!state.busy && i >= 0) showTask(i); });
   $('btnNext').addEventListener('click', goNext);
   $('btnUnmarkable').addEventListener('click', markUnmarkable);
   $('btnSkip').addEventListener('click', skipTask);
@@ -1209,11 +1467,11 @@
 
   window.addEventListener('keydown', (e) => {
     if (e.target && /input|textarea/i.test(e.target.tagName)) return;
-    if (!$('dialog').hidden || !$('startScreen').hidden) return;
+    if (!$('dialog').hidden || !$('startScreen').hidden || !$('caseScreen').hidden) return;
     if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); }
     else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); }
     else if (e.key === 'Escape') { for (const v of Object.values(viewers)) v.cancelSession(); }
-    else if (e.key === 'ArrowLeft') { if (!state.busy) showTask(state.index - 1); }
+    else if (e.key === 'ArrowLeft') { const i = prevIndex(); if (!state.busy && i >= 0) showTask(i); }
     else if (e.key === 'ArrowRight') goNext();
   });
   window.addEventListener('blur', () => { for (const v of Object.values(viewers)) v.cancelSession(); });
@@ -1343,7 +1601,8 @@
   // ให้สคริปต์ทดสอบอัตโนมัติเข้าถึงได้
   window.__marker = {
     state, viewers, showTask, Debug, setFingerMode, undo, deleteSelected, goNext, save, editNote, skipTask, checkUpdate,
-    sync, api, finish,
+    sync, api, finish, openCase: (no) => openCase((state.cases || []).find((c) => c.no === no)), showCaseList,
+    ghostFor, mismatchWarning, reviewEdits,
     flushSave: () => flushAll(10000),
     marks: () => { const t = task(); return t && { xray: t.xray, fluoro: t.fluoro, undo: (state.undo[currentItem().task_id] || []).length, status: t.status }; },
     task: () => task(),

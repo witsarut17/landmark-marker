@@ -2,6 +2,7 @@
 
 tasks_latest = สถานะล่าสุดต่องาน · task_events = ทุกการบันทึก (ไม่ลบ ไม่ทับ ใช้ตรวจย้อนหลัง/กู้คืน)
 login_links = ลิงก์ส่วนตัวของหมอ (เก็บเฉพาะ hash ของโทเคน) · ตารางใหม่ถูกเพิ่มเองเมื่อเปิดเซิร์ฟเวอร์ (CREATE IF NOT EXISTS)
+study = นิยามการศึกษา ทีมมาร์ก-หมอตรวจ (v1.3) · review_seeds = จุดของทีมที่หมอเห็นตอนบันทึกงานนั้นครั้งแรก (ไม่ถูกแก้)
 """
 
 from __future__ import annotations
@@ -72,6 +73,22 @@ CREATE TABLE IF NOT EXISTS login_links (
   last_used_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_links_user ON login_links (user_id);
+CREATE TABLE IF NOT EXISTS study (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  package_id TEXT NOT NULL,
+  data TEXT NOT NULL,
+  set_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS review_seeds (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  package_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  team_user TEXT,
+  team_rev INTEGER,
+  data TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, package_id, task_id)
+);
 CREATE TABLE IF NOT EXISTS user_meta (
   user_id INTEGER NOT NULL REFERENCES users(id),
   package_id TEXT NOT NULL,

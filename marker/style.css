@@ -308,3 +308,17 @@ code { background: #0003; padding: 1px 5px; border-radius: 4px; }
 .login-form input { padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; font-size: 16px; }
 #saveLabel { display: inline-block; min-width: 9.5em; white-space: nowrap; }
 #userLabel { white-space: nowrap; }
+
+/* หน้ารายการเคส (การศึกษา ทีมมาร์ก-หมอตรวจ) */
+.case-card { width: min(980px, 96vw); }
+.case-card .btn-big { width: 100%; font-size: 20px; padding: 16px; margin: 6px 0 10px; }
+.case-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; margin: 10px 0; }
+.case-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; min-height: 56px; }
+.case-item b { font-size: 16px; }
+.case-item span { font-size: 13px; opacity: 0.85; }
+.case-item.st-done { border-color: #3ddc84; background: rgba(61, 220, 132, 0.12); }
+.case-item.st-part { border-color: #3fb6ff; background: rgba(63, 182, 255, 0.10); }
+.case-item.st-skip { border-color: #ffb020; background: rgba(255, 176, 32, 0.14); }
+.case-item:focus-visible { outline: 2px solid #3fb6ff; }
+

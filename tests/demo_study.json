@@ -1,0 +1,62 @@
+{
+ "format": "pelnav-study",
+ "version": 1,
+ "package_id": "pkg-test-20261108",
+ "seed": 1,
+ "cases": [
+  {
+   "no": 1,
+   "tasks": [
+    "T001",
+    "T002"
+   ],
+   "marker": "team1"
+  },
+  {
+   "no": 2,
+   "tasks": [
+    "T006"
+   ],
+   "marker": "team1"
+  },
+  {
+   "no": 3,
+   "tasks": [
+    "T003"
+   ],
+   "marker": "team2"
+  },
+  {
+   "no": 4,
+   "tasks": [
+    "T004"
+   ],
+   "marker": "team2"
+  }
+ ],
+ "extra": [
+  {
+   "no": 5,
+   "task": "T003",
+   "marker": "team1"
+  },
+  {
+   "no": 6,
+   "task": "T006",
+   "marker": "team2"
+  }
+ ],
+ "order": {
+  "team1": [
+   1,
+   5,
+   2
+  ],
+  "team2": [
+   3,
+   6,
+   4
+  ]
+ },
+ "note": "ตัวอย่างสำหรับลองบนโน้ตบุ๊กด้วยภาพทดสอบ (test_package) — ไม่ใช่ข้อมูลจริง"
+}

@@ -121,16 +121,21 @@ def load_manifest(pkg_dir: Path) -> tuple[dict, str]:
     return m, hashlib.sha256(raw).hexdigest()
 
 
-def public_manifest(m: dict) -> dict:
-    """manifest ที่ส่งให้หน้าเว็บ: ไม่ส่งชื่อไฟล์จริง (อาจมีข้อมูลผู้ป่วย) ใช้ชื่อตามรหัสงาน + นามสกุลเดิมแทน"""
+def public_manifest(m: dict, only: list | None = None) -> dict:
+    """manifest ที่ส่งให้หน้าเว็บ: ไม่ส่งชื่อไฟล์จริง (อาจมีข้อมูลผู้ป่วย) ใช้ชื่อตามรหัสงาน + นามสกุลเดิมแทน
+    only = เฉพาะงานเหล่านี้ ตามลำดับที่ให้ (มุมมองของผู้ใช้ในการศึกษา)"""
     items = []
-    for it in m["items"]:
+    src = m["items"]
+    if only is not None:
+        by = {it["task_id"]: it for it in src}
+        src = [by[t] for t in only]
+    for it in src:
         items.append({
             "task_id": it["task_id"],
             "xray": f"{it['task_id']}_X{Path(it['xray']).suffix.lower()}",
             "fluoro": f"{it['task_id']}_F{Path(it['fluoro']).suffix.lower()}",
             "xray_size": it["xray_size"], "fluoro_size": it["fluoro_size"],
-            "box_xyxy": it["box_xyxy"], "is_repeat_of": it.get("is_repeat_of"),
+            "box_xyxy": it["box_xyxy"], "is_repeat_of": it.get("is_repeat_of") if only is None else None,
             **({"rotation": it["rotation"]} if "rotation" in it else {}),
             **({"fluoro_area": it["fluoro_area"]} if it.get("fluoro_area") is not None else {}),
         })
