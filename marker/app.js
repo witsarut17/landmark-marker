@@ -506,6 +506,9 @@
       const pairs = pairCount(t);
       $('pairCount').textContent = `${pairs}/${N} คู่`;
       const nextWord = state.mode === 'review' ? 'ยืนยัน' : 'ถัดไป';
+      const sd = state.mode === 'review' ? state.seeds[currentItem().task_id] : null;
+      // งานนี้ทีมวางจุดไว้หรือยัง (ยังไม่มี = หมอวางเองทั้งหมด เช่น ก่อนนำเข้าจุดของทีม)
+      const teamPts = !!(sd && SIDES.some((s) => Array.isArray(sd[s]) && sd[s].some(Boolean)));
       if (t.status === 'unmarkable') {
         chip.textContent = '×'; chip.style.background = '#e5484d';
         $('hintText').textContent = `มาร์กไม่ได้: ${REASON_NAME[t.reason] || t.reason}${t.reason_text ? ' — ' + t.reason_text : ''} · กด ${nextWord}`;
@@ -514,7 +517,7 @@
         chip.textContent = '✓'; chip.style.background = '#3ddc84';
         $('hintText').textContent = state.mode === 'review'
           ? (FINAL.has(t.status) ? 'ยืนยันแล้ว · ลากแก้ได้ แล้วกด ยืนยัน อีกครั้ง'
-            : 'ตรวจจุดของทีม · ถูกต้อง กด ยืนยัน · ไม่ตรง ลากแก้')
+            : teamPts ? 'ตรวจจุดของทีม · ถูกต้อง กด ยืนยัน · ไม่ตรง ลากแก้' : 'ครบ 4 คู่ · กด ยืนยัน')
           : 'ครบ 4 คู่ · กด ถัดไป';
         for (const s of SIDES) panes[s].style.borderColor = '';
       } else {
@@ -527,12 +530,11 @@
         for (const s of SIDES) panes[s].style.borderColor = need.includes(s) ? color : '';
         if (t.status === 'partial') $('hintText').textContent = 'บันทึก 3 คู่ · ' + $('hintText').textContent;
         if (t.status === 'skipped') $('hintText').textContent = 'ข้ามไว้ · ' + $('hintText').textContent;
-        const sd = state.mode === 'review' ? state.seeds[currentItem().task_id] : null;
         if (state.mode === 'review' && !FINAL.has(t.status)) {
           if (sd && sd.status === 'unmarkable' && pairs === 0) {
             $('hintText').textContent = `ทีม: มาร์กไม่ได้ (${REASON_NAME[sd.reason] || sd.reason || '-'}) · เห็นด้วยกด มาร์กไม่ได้ หรือวางจุดเอง`;
-          } else if (!sd || pairs === 0) {
-            $('hintText').textContent = 'ไม่มีจุดของทีม · วางจุดเอง หรือกด มาร์กไม่ได้';
+          } else if (!teamPts) {
+            if (pairs === 0) $('hintText').textContent = 'ไม่มีจุดของทีม · ' + $('hintText').textContent;
           } else {
             $('hintText').textContent = 'ตรวจจุดของทีม · ' + $('hintText').textContent;
           }
@@ -1168,8 +1170,10 @@
       return;
     }
     if (state.mode === 'review' && FINAL.has(t.status) && t.status !== 'unmarkable') {
-      const e = reviewEdits(currentItem().task_id, t);
-      toast(e ? `ยืนยันแล้ว — แก้ ${e} จุด` : 'ยืนยันแล้ว — ไม่ได้แก้', 2500);
+      const tid = currentItem().task_id, s = state.seeds[tid];
+      const hadTeam = !!(s && SIDES.some((x) => Array.isArray(s[x]) && s[x].some(Boolean)));
+      const e = reviewEdits(tid, t);
+      toast(!hadTeam ? 'ยืนยันแล้ว' : e ? `ยืนยันแล้ว — แก้ ${e} จุด` : 'ยืนยันแล้ว — ไม่ได้แก้', 2500);
     }
     await advance();
   }
@@ -1409,7 +1413,8 @@
     }
     if (!shown) list.append(el('p', { class: 'muted', text: 'ทำครบทุกเคสแล้ว' }));
     const doneCases = state.cases.filter((c) => caseStatus(c).key === 'done').length;
-    $('caseTitle').textContent = state.mode === 'review' ? 'ตรวจจุดของทีม' : 'มาร์กจุด';
+    const anyTeam = Object.values(state.seeds || {}).some((s) => s && SIDES.some((x) => Array.isArray(s[x]) && s[x].some(Boolean)));
+    $('caseTitle').textContent = state.mode === 'review' && anyTeam ? 'ตรวจจุดของทีม' : 'มาร์กจุด';
     $('caseSummary').textContent = `เสร็จ ${doneCases}/${state.cases.length} เคส · ${completedCount()}/${totalTasks()} คู่`
       + (skippedCount() ? ` · ข้ามไว้ ${skippedCount()} คู่` : '');
     $('caseBar').style.width = `${totalTasks() ? Math.round(100 * completedCount() / totalTasks()) : 0}%`;
