@@ -18,7 +18,7 @@
 ## ติดตั้งครั้งแรก
 
 1. `mkdir -p <ROOT>/packages && chmod 700 <ROOT>`
-2. เอาโค้ดลงเครื่องที่ `<ROOT>/app` — `git clone https://github.com/witsarut17/landmark-marker.git <ROOT>/app` (หรือแตก zip ของ commit ที่ทีมกำหนด)
+2. เอาโค้ดลงเครื่องที่ `<ROOT>/app` — `git clone https://github.com/witsarut17/landmark-marker.git <ROOT>/app` (หรือแตก zip ของเวอร์ชันที่ทีมกำหนด เช่น tag `v1.3.2`)
 3. คัดลอกแพ็กเกจภาพไว้ที่ `<ROOT>/packages` ทางที่ทีมกำหนด · เช็ก `sha256sum` ของ zip ให้ตรงกับที่ทีมแจ้ง · แตกแล้ว**ลบ zip ทิ้งทุกที่**
 4. build image (ครั้งเดียว หรือเมื่อ `server/requirements.txt` เปลี่ยน)
    ```
@@ -88,4 +88,19 @@ ss -ltnp | grep -E ':(8091|8099)\b'
 - ปิด/เปิด: `docker stop pelnav` / `docker start pelnav` (ปิดแล้วจะไม่เปิดเองตอนรีบูตจนกว่าจะ start)
 - สำรองข้อมูล: อัตโนมัติทุกชั่วโมงที่ `<ROOT>/data/backups` · สำรองทันที: `<ROOT>/m backup-now`
 - อัปเดตโค้ด: `<ROOT>/m backup-now` → อัปเดต `<ROOT>/app` (git pull หรือแตก zip ทับ) → ถ้า `server/requirements.txt` เปลี่ยน ให้ build image ใหม่แล้ว `docker rm -f pelnav && <ROOT>/run.sh` · ถ้าเปลี่ยนแค่หน้าเว็บ (`marker/`) ไม่ต้องรีสตาร์ท หน้าเว็บของผู้ใช้โหลดรุ่นใหม่เอง
+
+## ถ้า git pull ขึ้นว่า "diverged" / "refusing to merge unrelated histories" (ประวัติ git ถูกเขียนใหม่ 2026-11-26)
+
+ทีมเขียนข้อความ commit เก่าใหม่ (เนื้อหาไฟล์เหมือนเดิมทุกไฟล์) → รหัส commit เปลี่ยนหมด ให้ตั้งโค้ดใน `<ROOT>/app` ให้ตรง GitHub ครั้งเดียว — **ไม่แตะ `<ROOT>/data` (ฐานข้อมูล แพ็กเกจ log)** เพราะอยู่นอกโฟลเดอร์โค้ด:
+```
+<ROOT>/m backup-now
+cd <ROOT>/app
+git status --short
+git fetch origin --tags --force
+git reset --hard origin/main
+git log -1 --oneline
+```
+- `git status --short` ควรว่าง · ถ้ามีไฟล์ที่แก้เองบนเครื่องนี้ ให้ `git stash` ก่อน reset (ห้ามใช้ `git clean`)
+- ไม่ต้องรีสตาร์ท container เพราะไฟล์โค้ดเหมือนเดิม (ถ้าอยากชัวร์: `docker restart pelnav`)
+- ติดตั้งแบบแตก zip (ไม่มีโฟลเดอร์ `.git`) = ไม่ต้องทำอะไร
 - ไม่มีไฟร์วอลล์ของเครื่องตั้งให้ (ไม่ใช้ sudo) — แอปกรองเครือข่ายเองตาม `allowed_networks` ใน `config.toml`
