@@ -62,9 +62,10 @@ HN = re.compile(r"\bHN\s*[:：]?\s*\d{5,}", re.I)
 
 def git_files() -> list[str] | None:
     try:
-        out = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"],
-                             cwd=ROOT, capture_output=True, text=True, check=True)
-        return [l for l in out.stdout.splitlines() if l]
+        # -z + quotepath=off: ชื่อไฟล์ภาษาไทยมาเป็นชื่อจริง (ไม่ใช่ "\340\270…" ที่เปิดไฟล์ไม่ได้)
+        out = subprocess.run(["git", "-c", "core.quotepath=off", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                             cwd=ROOT, capture_output=True, check=True)
+        return [l for l in out.stdout.decode("utf-8").split("\0") if l]
     except Exception:
         return None
 
