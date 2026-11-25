@@ -5,7 +5,7 @@
 - สเปก: [SPEC_marking_tool.md](SPEC_marking_tool.md) · การตัดสินใจเพิ่มเติม: [DECISIONS.md](DECISIONS.md)
 - **v1.3 (ปัจจุบัน): ทีมมาร์กก่อน หมอตรวจ** — ทีม 2 คนวางจุดให้ทุกงานก่อน หมอยืนยันหรือลากแก้ · หน้ารายการเคส 1–70 · ตัวช่วยคาดตำแหน่งของทีม · ไฟล์วิเคราะห์ (สถานะการตรวจ + ระยะที่หมอแก้) · ลองบนโน้ตบุ๊ก/เริ่มมาร์กจริง: [SERVER_DEV.md](SERVER_DEV.md) · คู่มือทีม: [TEAM_GUIDE.md](TEAM_GUIDE.md)
 - **v1.1: รุ่นเซิร์ฟเวอร์** — ภาพและจุดอยู่บนเซิร์ฟเวอร์แล็บ (http ผ่าน VPN แบบเดียวกับ CVAT · รับเฉพาะเครือข่ายภายใน) หมอแตะ**ลิงก์ส่วนตัว**ครั้งเดียว ไม่ต้องพิมพ์รหัสผ่าน แล้วมาร์กจุดอย่างเดียว (บันทึกขึ้นเซิร์ฟเวอร์ทุกครั้ง เน็ตหลุดเก็บในเครื่องแล้วส่งเอง)
-  แผน: [SERVER_PLAN.md](SERVER_PLAN.md) · ลองบนโน้ตบุ๊ก: [SERVER_DEV.md](SERVER_DEV.md) · ติดตั้งเครื่องแล็บ: [LAB_INSTALL.md](LAB_INSTALL.md) (Windows) / [LAB_INSTALL_LINUX.md](LAB_INSTALL_LINUX.md) (Linux + docker) · คู่มือหมอ: [DOCTOR_GUIDE.md](DOCTOR_GUIDE.md)
+  แผน: [SERVER_PLAN.md](SERVER_PLAN.md) · ลองบนโน้ตบุ๊ก: [SERVER_DEV.md](SERVER_DEV.md) · ติดตั้งเครื่องแล็บ: [LAB_INSTALL.md](LAB_INSTALL.md) (Windows) / [LAB_INSTALL_LINUX.md](LAB_INSTALL_LINUX.md) (Linux + docker) · คู่มือหมอ: [DOCTOR_GUIDE.md](DOCTOR_GUIDE.md) · คู่มือใช้งานทีละขั้นพร้อมภาพ: [docs/คู่มือใช้งาน-PelNav-แพทย์.pdf](docs/คู่มือใช้งาน-PelNav-แพทย์.pdf) (.docx แก้ไขได้)
 - รุ่นเดิม v0.9.0 (เลือกไฟล์ในเครื่อง ไม่มีเซิร์ฟเวอร์) ยังอยู่ที่ GitHub Pages เป็นตัวสาธิต — ไม่เผยแพร่อัตโนมัติอีกแล้ว
 
 ## สถานะ
