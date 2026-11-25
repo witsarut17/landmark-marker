@@ -3,10 +3,13 @@ html, body { overflow: auto; height: auto; }
 body.admin { display: block; padding: 24px 16px; }
 .admin-wrap { max-width: 980px; margin: 0 auto; }
 .admin-wrap h1 { font-size: 22px; margin: 0 0 4px; }
-.admin-wrap .card { margin: 16px 0; }
+.admin-wrap .card { width: 100%; margin: 16px 0; }
 .admin-form { display: grid; gap: 10px; max-width: 360px; }
-.admin-form input { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; }
+.admin-form input { padding: 11px 12px; border-radius: var(--radius); border: 1px solid var(--line-strong); background: var(--bg); color: inherit; font: inherit; }
+.admin-form input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 table.prog { width: 100%; border-collapse: collapse; font-size: 14px; }
-table.prog th, table.prog td { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: middle; }
+table.prog th, table.prog td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; vertical-align: middle; }
+table.prog th { color: var(--muted); font-weight: 600; font-size: 13px; }
+table.prog tr:hover td { background: rgba(255, 255, 255, 0.02); }
 table.prog td.num { font-variant-numeric: tabular-nums; }
 .admin-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }

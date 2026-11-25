@@ -15,7 +15,6 @@
     partial: [['no_4th_point', 'หาจุดที่ 4 ที่เห็นชัดทั้งสองภาพไม่ได้'], ['unclear', 'ภาพไม่ชัด'], ['view_angle', 'มุมถ่ายต่างกันมาก'], ['other', 'อื่น ๆ (พิมพ์เหตุผล)']],
   };
   // คำแนะนำการเลือกจุด (ใช้ทั้งแถบคำแนะนำและหน้าแรก)
-  const POINT_TIP = 'เลือกจุดที่ชัดและไม่เปลี่ยนรูปตามมุมถ่าย เช่น ขอบรูกระดูก ปลายสกรู มุมแผ่นโลหะ';
   const NOTE_MAX = 300;
   const REASON_NAME = Object.fromEntries([...REASONS.unmarkable, ...REASONS.partial]);
   const $ = (id) => document.getElementById(id);
@@ -505,38 +504,37 @@
     } else {
       const k = activeIndex(t);
       const pairs = pairCount(t);
-      $('pairCount').textContent = `ครบ ${pairs}/${N} คู่`;
+      $('pairCount').textContent = `${pairs}/${N} คู่`;
+      const nextWord = state.mode === 'review' ? 'ยืนยัน' : 'ถัดไป';
       if (t.status === 'unmarkable') {
         chip.textContent = '×'; chip.style.background = '#e5484d';
-        $('hintText').textContent = `งานนี้: มาร์กไม่ได้ (${REASON_NAME[t.reason] || t.reason}${t.reason_text ? ': ' + t.reason_text : ''}) — กด ถัดไป`;
+        $('hintText').textContent = `มาร์กไม่ได้: ${REASON_NAME[t.reason] || t.reason}${t.reason_text ? ' — ' + t.reason_text : ''} · กด ${nextWord}`;
         for (const s of SIDES) panes[s].style.borderColor = '';
       } else if (k == null) {
         chip.textContent = '✓'; chip.style.background = '#3ddc84';
         $('hintText').textContent = state.mode === 'review'
-          ? (FINAL.has(t.status) ? 'ยืนยันแล้ว — ลากจุดเพื่อแก้ได้ แล้วกด ยืนยัน อีกครั้ง'
-            : 'ตรวจจุดของทีม: ถูกต้อง กด ยืนยัน · ไม่ตรง ลากจุดเพื่อแก้ แล้วกด ยืนยัน')
-          : 'ครบ 4 คู่แล้ว — กด ถัดไป (ลากจุดเพื่อปรับได้)';
+          ? (FINAL.has(t.status) ? 'ยืนยันแล้ว · ลากแก้ได้ แล้วกด ยืนยัน อีกครั้ง'
+            : 'ตรวจจุดของทีม · ถูกต้อง กด ยืนยัน · ไม่ตรง ลากแก้')
+          : 'ครบ 4 คู่ · กด ถัดไป';
         for (const s of SIDES) panes[s].style.borderColor = '';
       } else {
         const color = CFG.marks.colors[k];
         chip.textContent = String(k + 1); chip.style.background = color;
         const need = SIDES.filter((s) => !t[s][k]);
         $('hintText').textContent = need.length === 2
-          ? (k === 0 && pairs === 0
-            ? `จุด 1 (ภาพใดก็ได้): ${POINT_TIP}`
-            : `วางจุด ${k + 1} บนภาพใดก็ได้ — ชัด ไม่เปลี่ยนรูปตามมุมถ่าย กระจายให้ทั่วกรอบ`)
+          ? `วางจุด ${k + 1} บนภาพใดก็ได้`
           : `วางจุด ${k + 1} บน${SIDE_NAME[need[0]]}ให้ตรงกับอีกภาพ`;
         for (const s of SIDES) panes[s].style.borderColor = need.includes(s) ? color : '';
-        if (t.status === 'partial') $('hintText').textContent = 'งานนี้: บันทึก 3 คู่ — ' + $('hintText').textContent;
-        if (t.status === 'skipped') $('hintText').textContent = 'งานนี้: ข้ามไว้ — ' + $('hintText').textContent;
+        if (t.status === 'partial') $('hintText').textContent = 'บันทึก 3 คู่ · ' + $('hintText').textContent;
+        if (t.status === 'skipped') $('hintText').textContent = 'ข้ามไว้ · ' + $('hintText').textContent;
         const sd = state.mode === 'review' ? state.seeds[currentItem().task_id] : null;
         if (state.mode === 'review' && !FINAL.has(t.status)) {
           if (sd && sd.status === 'unmarkable' && pairs === 0) {
-            $('hintText').textContent = `ทีมระบุว่ามาร์กไม่ได้ (${REASON_NAME[sd.reason] || sd.reason || '-'}) — ถ้าเห็นด้วย กด มาร์กไม่ได้ · ถ้ามาร์กได้ ให้วางจุดเอง`;
+            $('hintText').textContent = `ทีม: มาร์กไม่ได้ (${REASON_NAME[sd.reason] || sd.reason || '-'}) · เห็นด้วยกด มาร์กไม่ได้ หรือวางจุดเอง`;
           } else if (!sd || pairs === 0) {
-            $('hintText').textContent = 'งานนี้ไม่มีจุดของทีม — วางจุดเอง หรือกด มาร์กไม่ได้';
+            $('hintText').textContent = 'ไม่มีจุดของทีม · วางจุดเอง หรือกด มาร์กไม่ได้';
           } else {
-            $('hintText').textContent = 'ตรวจจุดของทีม: ' + $('hintText').textContent;
+            $('hintText').textContent = 'ตรวจจุดของทีม · ' + $('hintText').textContent;
           }
         }
       }
@@ -822,7 +820,7 @@
     if (sync.needLogin) { l.textContent = `ต้องเข้าสู่ระบบ · ค้าง ${n}`; l.className = 'small err'; }
     else if (n && sync.lastErr) { l.textContent = `ยังไม่ได้ส่ง ${n} งาน`; l.className = 'small err'; }
     else if (n || sync.sending) { l.textContent = 'กำลังบันทึก…'; l.className = 'muted small'; }
-    else { l.className = 'muted small'; l.textContent = sync.lastOk ? `บันทึกแล้ว ${new Date(sync.lastOk).toLocaleTimeString('th-TH')}` : ''; }
+    else { l.className = 'muted small'; l.textContent = sync.lastOk ? `✓ บันทึกแล้ว ${new Date(sync.lastOk).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}` : ''; }
     l.title = sync.lastErr ? `ส่งขึ้นเซิร์ฟเวอร์ไม่ได้: ${sync.lastErr} — เว็บจะลองใหม่เอง` : 'บันทึกบนเซิร์ฟเวอร์อัตโนมัติ';
   }
   document.addEventListener('visibilitychange', () => {
@@ -1411,9 +1409,10 @@
     }
     if (!shown) list.append(el('p', { class: 'muted', text: 'ทำครบทุกเคสแล้ว' }));
     const doneCases = state.cases.filter((c) => caseStatus(c).key === 'done').length;
-    $('caseTitle').textContent = state.mode === 'review' ? 'ตรวจจุดของทีม — รายการเคส' : 'มาร์กจุด — รายการเคส';
+    $('caseTitle').textContent = state.mode === 'review' ? 'ตรวจจุดของทีม' : 'มาร์กจุด';
     $('caseSummary').textContent = `เสร็จ ${doneCases}/${state.cases.length} เคส · ${completedCount()}/${totalTasks()} คู่`
       + (skippedCount() ? ` · ข้ามไว้ ${skippedCount()} คู่` : '');
+    $('caseBar').style.width = `${totalTasks() ? Math.round(100 * completedCount() / totalTasks()) : 0}%`;
     $('caseUser').textContent = sync.user ? `บัญชี ${sync.user}` : '';
     $('btnContinue').disabled = !nextOpenCase();
   }
