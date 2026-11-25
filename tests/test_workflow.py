@@ -261,7 +261,7 @@ def tasks_equal(a, b):
 
 # ---------------------------------------------------------------- S: เซิร์ฟเวอร์ (เข้าสู่ระบบ บันทึก เปิดใหม่ อีกเครื่อง)
 def wait_saved(p, timeout=10000):
-    p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึกแล้ว')", timeout=timeout)
+    p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').includes('บันทึกแล้ว')", timeout=timeout)
 
 
 def test_server_save(env: Env):
@@ -384,7 +384,7 @@ def test_offline(env: Env):
     p = c.new_page()
     p.goto(S.url(PKG))
     wait_loaded(p)
-    p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึกแล้ว')", timeout=15000)
+    p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').includes('บันทึกแล้ว')", timeout=15000)
     srv3 = S.task_row(user[0], PKG, "T001")[1]
     res.check(srv3["xray"][2] is not None and p.evaluate("() => window.__marker.state.tasks['T001'].xray[2]") is not None,
               "O เน็ตหลุดแล้วปิดเว็บ → เปิดใหม่ งานที่ค้างถูกส่งขึ้นเซิร์ฟเวอร์ ไม่หาย", "")

@@ -650,7 +650,7 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
                   "ทุกครั้งที่วางหรือแก้จุด เว็บบันทึกขึ้นเซิร์ฟเวอร์ของโครงการทันที แพทย์ไม่ต้องกดบันทึก ไม่ต้องสำรอง "
                   "และไม่ต้องส่งไฟล์ หากเน็ตหรือ VPN หลุด เว็บเก็บงานไว้ในเครื่องชั่วคราวแล้วส่งให้เองเมื่อเชื่อมต่อได้อีกครั้ง")
         p.evaluate("() => window.__marker.flushSave()")
-        p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึกแล้ว')", timeout=15000)
+        p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').includes('บันทึกแล้ว')", timeout=15000)
         m.shot(p, "บันทึกบนเซิร์ฟเวอร์แล้ว",
                "เวลาที่บันทึกบนเซิร์ฟเวอร์ล่าสุดแสดงที่หมายเลข 1 และชื่อบัญชีที่เข้าสู่ระบบแสดงที่หมายเลข 2",
                [el("#saveLabel", 1, at="below"), el("#userLabel", 2, at="below")])
@@ -663,7 +663,7 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
                [el("#saveLabel", 1, at="below")])
         cd.set_offline(False)
         p.evaluate("() => window.dispatchEvent(new Event('online'))")
-        p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึกแล้ว')", timeout=20000)
+        p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').includes('บันทึกแล้ว')", timeout=20000)
 
         # ===== พักงาน =====
         m.section("พักงาน",
@@ -698,7 +698,7 @@ def capture(site: str, m: Manual, marks=None, shown: str | None = None):
                "เมื่อทีมส่งลิงก์ใหม่หรือลิงก์หมดอายุ จะขึ้นข้อความนี้ (หมายเลข 1) แตะลิงก์ล่าสุด งานที่ค้างจะส่งต่อเอง",
                [el("#loginMsg", 1)])
         p.goto(S.link(new_tok, "test_package"))
-        p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').startsWith('บันทึกแล้ว')", timeout=20000)
+        p.wait_for_function("() => (document.getElementById('saveLabel').textContent || '').includes('บันทึกแล้ว')", timeout=20000)
         # อัปเดตเว็บเอง: จำลองว่าเซิร์ฟเวอร์มีเวอร์ชันถัดไป แล้วถ่ายข้อความแจ้งก่อนเว็บโหลดใหม่ (0.8 วินาที)
         cur = re.search(r"PELNAV_VERSION = '([^']+)'", (ROOT / "marker" / "version.js").read_text(encoding="utf-8")).group(1)
         nxt = ".".join(cur.split(".")[:2] + [str(int(cur.split(".")[2]) + 1)])

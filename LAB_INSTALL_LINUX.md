@@ -63,6 +63,25 @@
   ```
   เมื่อได้ `team_marks.json` ภายหลัง ใช้ `import-marks` ตั้งการศึกษาแทนได้ (จุดที่บันทึกไว้แล้วยังอยู่ตาม task_id)
 
+## รีเซ็ตรหัสบัญชีทีม (team1, team2)
+
+รหัสใหม่แสดงครั้งเดียว (ออกจากระบบทุกเครื่องของบัญชีนั้น) → ส่งให้เจ้าของทางช่องทางส่วนตัว · แก้ `<ROOT>` เป็นโฟลเดอร์ที่ติดตั้ง แล้วคัดลอกทั้ง 2 บรรทัด:
+```
+<ROOT>/m reset-password team1
+<ROOT>/m reset-password team2
+```
+- ถ้าขึ้น "ไม่มีผู้ใช้ …" ให้สร้างแทน: `<ROOT>/m add-user team2 --role team`
+
+## ที่อยู่ที่ทีมและหมอใช้ (ต้องเป็นเซิร์ฟเวอร์เดียวกัน)
+
+ตรวจว่าแอปฟังพอร์ตไหน และลิงก์ของหมอชี้ไปที่ไหน:
+```
+grep -E '^(port|public_url)' <ROOT>/data/config.toml
+docker ps --filter name=pelnav
+ss -ltnp | grep -E ':(8091|8099)\b'
+```
+- หน้าทีม = `http://<IP เครื่องแล็บ>:<port>/admin.html` (พอร์ตเดียวกับ `public_url`) · ถ้ามีพอร์ตอื่น (เช่น :8099) ที่ส่งต่อไป container `pelnav` เดียวกัน ใช้ได้เหมือนกัน แต่ถ้าเป็นอีก container จุดจะไปอยู่คนละฐานข้อมูล
+
 ## ดูแลประจำ
 
 - สถานะ: `docker ps --filter name=pelnav` · log เปิด/ปิด: `docker logs --tail 50 pelnav` · log การใช้งาน: `<ROOT>/data/logs/app.log`

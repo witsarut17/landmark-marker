@@ -382,7 +382,7 @@ def browser_part(browser):
         q.click("#btnUnmarkable")
         choose_reason(q, "no_overlap")
         q.wait_for_selector("#caseScreen:not([hidden])", timeout=10000)
-        check("ทีมระบุว่ามาร์กไม่ได้" in hint2, "D งานที่ทีมมาร์กไม่ได้ → บอกหมอ · หมอกด มาร์กไม่ได้ ได้", hint2)
+        check("ทีม" in hint2 and "มาร์กไม่ได้" in hint2 and "ไม่มีบริเวณร่วมกัน" in hint2, "D งานที่ทีมมาร์กไม่ได้ → บอกหมอ · หมอกด มาร์กไม่ได้ ได้", hint2)
         q.click("[data-case='2']")
         wait_task(q, "เคส 2 · คู่ 1/1")
         iq = Input(q, c2, "mouse")
