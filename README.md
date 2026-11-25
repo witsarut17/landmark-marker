@@ -5,7 +5,7 @@
 - สเปก: [SPEC_marking_tool.md](SPEC_marking_tool.md) · การตัดสินใจเพิ่มเติม: [DECISIONS.md](DECISIONS.md)
 - **v1.3 (ปัจจุบัน): ทีมมาร์กก่อน หมอตรวจ** — ทีม 2 คนวางจุดให้ทุกงานก่อน หมอยืนยันหรือลากแก้ · หน้ารายการเคส 1–70 · ตัวช่วยคาดตำแหน่งของทีม · ไฟล์วิเคราะห์ (สถานะการตรวจ + ระยะที่หมอแก้) · ลองบนโน้ตบุ๊ก/เริ่มมาร์กจริง: [SERVER_DEV.md](SERVER_DEV.md) · คู่มือทีม: [TEAM_GUIDE.md](TEAM_GUIDE.md)
 - **v1.1: รุ่นเซิร์ฟเวอร์** — ภาพและจุดอยู่บนเซิร์ฟเวอร์แล็บ (http ผ่าน VPN แบบเดียวกับ CVAT · รับเฉพาะเครือข่ายภายใน) หมอแตะ**ลิงก์ส่วนตัว**ครั้งเดียว ไม่ต้องพิมพ์รหัสผ่าน แล้วมาร์กจุดอย่างเดียว (บันทึกขึ้นเซิร์ฟเวอร์ทุกครั้ง เน็ตหลุดเก็บในเครื่องแล้วส่งเอง)
-  แผน: [SERVER_PLAN.md](SERVER_PLAN.md) · ลองบนโน้ตบุ๊ก: [SERVER_DEV.md](SERVER_DEV.md) · ติดตั้งเครื่องแล็บ: [LAB_INSTALL.md](LAB_INSTALL.md) · คู่มือหมอ: [DOCTOR_GUIDE.md](DOCTOR_GUIDE.md)
+  แผน: [SERVER_PLAN.md](SERVER_PLAN.md) · ลองบนโน้ตบุ๊ก: [SERVER_DEV.md](SERVER_DEV.md) · ติดตั้งเครื่องแล็บ: [LAB_INSTALL.md](LAB_INSTALL.md) (Windows) / [LAB_INSTALL_LINUX.md](LAB_INSTALL_LINUX.md) (Linux + docker) · คู่มือหมอ: [DOCTOR_GUIDE.md](DOCTOR_GUIDE.md)
 - รุ่นเดิม v0.9.0 (เลือกไฟล์ในเครื่อง ไม่มีเซิร์ฟเวอร์) ยังอยู่ที่ GitHub Pages เป็นตัวสาธิต — ไม่เผยแพร่อัตโนมัติอีกแล้ว
 
 ## สถานะ
@@ -32,7 +32,7 @@
 
 ```
 marker/      index.html, style.css, config.js (ค่าตั้ง), version.js, viewer.js (ซูม/พิกัด), loader.js (ตรวจ manifest/ภาพ), store.js (คิวรอส่งในเครื่อง), app.js, admin.html/js (หน้าทีม), exporter.js (JSON/CSV)
-server/      app.py (Flask), db.py (SQLite), auth.py, validate.py, backup.py, manage.py (คำสั่ง), windows/ (สคริปต์ติดตั้งเครื่องแล็บ)
+server/      app.py (Flask), db.py (SQLite), auth.py, validate.py, backup.py, manage.py (คำสั่ง), windows/ (สคริปต์ติดตั้งเครื่องแล็บ), linux/ (Dockerfile + m + run.sh สำหรับ Linux)
 tools/       inspect_coco.py, make_study_package.py, serve_lan.py, check_publish.py, print_guide.py
 tests/       make_test_images.py, test_coordinates.py, test_workflow.py, test_server.py, server_fixture.py, generated/ (สร้างใหม่ได้ ไม่ขึ้น git)
 ```
