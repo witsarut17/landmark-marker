@@ -250,7 +250,8 @@ def create_app(cfg: Config) -> Flask:
     def login():
         d = request.get_json(silent=True) or {}
         username = str(d.get("username", ""))[:80].strip().lower()
-        password = str(d.get("password", ""))[:200]
+        # ตัดช่องว่าง/ขึ้นบรรทัดหน้าหลัง: รหัสที่ระบบสร้างไม่มีช่องว่าง แต่คัดลอกจากแชตมักติดช่องว่างท้ายมาด้วย
+        password = str(d.get("password", "")).strip()[:200]
         ip = client_ip()
         if limiter.blocked(f"ip:{ip}", f"user:{username}"):
             log.warning("เข้าสู่ระบบถูกระงับชั่วคราว (ลองผิดหลายครั้ง) ip=%s user=%s", ip, username)

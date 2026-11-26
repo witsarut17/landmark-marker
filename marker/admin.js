@@ -123,7 +123,7 @@
     ev.preventDefault();
     $('loginErr').textContent = '';
     try {
-      await api('/api/login', { method: 'POST', body: JSON.stringify({ username: $('username').value, password: $('password').value }) });
+      await api('/api/login', { method: 'POST', body: JSON.stringify({ username: $('username').value.trim(), password: $('password').value.trim() }) });
       $('password').value = '';
       await start();
     } catch (e) {
