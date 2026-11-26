@@ -18,6 +18,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }   /* .btn ตั้ง display: inline-flex ซึ่งชนะ hidden ของเบราว์เซอร์ */
 html, body {
   height: 100%;
   margin: 0;
