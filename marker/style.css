@@ -99,6 +99,15 @@ a:hover { text-decoration: underline; }
 #btnFinish { background: transparent; border-color: var(--line-strong); }
 #btnDebug { min-width: 36px; padding: 0 8px; font-size: 18px; letter-spacing: 1px; }
 #btnCases { padding: 0 12px; }
+/* ปุ่มเลือกคู่ในเคส: กันที่ไว้ 3 ปุ่มเสมอ -> แถบบนไม่ขยับเมื่อเปลี่ยนเคส */
+.pair-nav { display: inline-flex; gap: 4px; min-width: 124px; }
+.pair-nav[hidden] { display: none; }
+.pair-btn { min-width: 38px; height: 34px; padding: 0 6px; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pair-btn.ps-done { border-color: var(--ok); color: #86efac; }
+.pair-btn.ps-unm { border-color: #e5484d; color: #fca5a5; }
+.pair-btn.ps-skip { border-color: var(--warn); color: var(--warn); }
+.pair-btn.ps-part { border-color: var(--accent); }
+.pair-btn.cur { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .btn[aria-pressed="true"] { background: rgba(34, 197, 94, 0.16); border-color: var(--ok); color: #86efac; }
 

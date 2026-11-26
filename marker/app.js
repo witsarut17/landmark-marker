@@ -556,6 +556,38 @@
     updateTopbar();
   }
 
+  // ปุ่มเลือกคู่ในเคส (1 · 2 · 3) พร้อมสถานะ — แตะแล้วไปคู่นั้นทันที (ทั้งโหมดทีมและโหมดหมอ)
+  const PAIR_STATE = {
+    done: ['✓', 'เสร็จ'], partial: ['✓', 'เสร็จ (3 คู่)'], unmarkable: ['×', 'มาร์กไม่ได้'],
+    skipped: ['↷', 'ข้ามไว้'], in_progress: ['•', 'กำลังทำ'], todo: ['', 'ยังไม่เริ่ม'],
+  };
+  let pairNavKey = null;
+  function renderPairNav(c) {
+    const nav = $('pairNav');
+    const key = c ? `${c.no}|${state.index}|${c.idx.map(statusAt).join(',')}` : '';
+    if (key === pairNavKey) return;
+    pairNavKey = key;
+    nav.hidden = !c;
+    nav.textContent = '';
+    if (!c) return;
+    c.idx.forEach((i, k) => {
+      const s = statusAt(i);
+      const [mark, text] = PAIR_STATE[s] || ['', s];
+      const cls = FINAL.has(s) ? (s === 'unmarkable' ? 'unm' : 'done') : s === 'skipped' ? 'skip' : s === 'in_progress' ? 'part' : 'todo';
+      const b = el('button', {
+        class: `btn pair-btn ps-${cls}${i === state.index ? ' cur' : ''}`, type: 'button', 'data-pair': String(k + 1),
+        title: `คู่ ${k + 1}: ${text}`, 'aria-label': `คู่ ${k + 1}: ${text}`, text: `${k + 1}${mark}`,
+      });
+      if (i === state.index) b.setAttribute('aria-current', 'true');
+      b.addEventListener('click', () => {
+        if (state.busy || i === state.index) return;
+        for (const v of Object.values(viewers)) v.cancelSession();
+        showTask(i);
+      });
+      nav.append(b);
+    });
+  }
+
   function updateTopbar() {
     const m = state.manifest;
     const n = totalTasks();
@@ -563,6 +595,7 @@
     $('taskLabel').textContent = !m ? '— / —'
       : c ? `เคส ${c.no} · คู่ ${c.idx.indexOf(state.index) + 1}/${c.idx.length}` : `${m.items[state.index].task_id} / ${n}`;
     $('btnCases').hidden = !caseMode();
+    renderPairNav(c);
     $('btnNext').textContent = state.mode === 'review' ? 'ยืนยัน ▶' : 'ถัดไป ▶';
     const pr = $('progress');
     pr.textContent = m ? `ทำแล้ว ${completedCount()}/${n}` : '';
@@ -1247,10 +1280,9 @@
     state.busy = true;
     try {
       refreshMarks();
-      if (caseMode()) {                              // ภายในเคส: งานถัดไปที่ยังไม่เสร็จ · ครบแล้วกลับหน้ารายการเคส
-        const nx = findForward(state.index, isOpenNormal);
-        const left = nx >= 0 ? nx : findCyclic(state.index, isOpenNormal);
-        if (left >= 0) { await showTask(left); return; }
+      if (caseMode()) {                              // ภายในเคส: คู่ถัดไปตามลำดับเสมอ (แม้เสร็จแล้ว) · คู่สุดท้ายของเคส → กลับหน้ารายการเคส
+        const nx = findForward(state.index, () => true);
+        if (nx >= 0) { await showTask(nx); return; }
         backToCases(caseDoneMessage(state.caseOfIndex[state.index]));
         return;
       }
@@ -1386,8 +1418,10 @@
   }
   function caseDoneMessage(c) {
     if (!c) return '';
+    const open = c.idx.filter((i) => !isFinalAt(i)).length;
     const sk = c.idx.filter((i) => statusAt(i) === 'skipped').length;
-    return sk ? `เคส ${c.no}: ข้ามไว้ ${sk} คู่ — แตะเคสนี้เพื่อกลับไปทำ` : `เคส ${c.no} เสร็จแล้ว`;
+    if (!open) return `เคส ${c.no} เสร็จแล้ว`;
+    return `เคส ${c.no}: ยังไม่เสร็จ ${open} คู่${sk ? ` (ข้ามไว้ ${sk})` : ''} — แตะเคสนี้เพื่อกลับไปทำ`;
   }
   function nextOpenCase() {
     const n = state.cases.length;
